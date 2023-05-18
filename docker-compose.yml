@@ -1,0 +1,12 @@
+version: '3.4'
+
+services:
+  bikesharing:
+    image: bikesharing
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    volumes:
+      - ./request_logs:/app/request_logs
+    env_file:
+      - .env

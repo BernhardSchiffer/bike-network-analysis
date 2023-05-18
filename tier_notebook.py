@@ -26,7 +26,6 @@ ft = "%Y-%m-%dT%H:%M:%S%z"
 def sleep_until(target):
     now = datetime.utcnow()
     delta = target - now
-    print(delta)
 
     if delta > timedelta(0):
         time.sleep(delta.total_seconds())
@@ -38,7 +37,9 @@ while True:
     try:
         request_time = datetime.utcnow()
 
+        print(request_time.strftime("%Y-%m-%dT%H:%M:%S"), "| sending request to:", URL)
         response = requests.request("GET", URL, headers=headers)
+        print(request_time.strftime("%Y-%m-%dT%H:%M:%S"), "| got response", response.status_code)
 
         with open(f'./request_logs/{request_time.strftime("%Y-%m-%dT%H-%M-%S%z")}.json', "w") as f:
             f.write(response.text)
