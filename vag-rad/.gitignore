@@ -1,0 +1,4 @@
+.venv/
+.env
+scraping_data/
+logs/
