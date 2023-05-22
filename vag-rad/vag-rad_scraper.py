@@ -22,7 +22,7 @@ def sleep_until(target):
         return True
 
 # %%
-logging.basicConfig(filename='./vag-rad-scraper.log', level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', datefmt=ft)
+logging.basicConfig(filename='./logs/vag-rad-scraper.log', level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', datefmt=ft)
 api_url = "https://api.nextbike.net/maps/nextbike-live.json?city=626"
 logging.info('starting scraper')
 
@@ -34,9 +34,9 @@ while True:
     try:
         response = requests.get(api_url, proxies=proxy_servers)
         timestamp = datetime.utcnow().replace(tzinfo=pytz.UTC)
-        nextupdate = timestamp + timedelta(seconds=10)
+        nextupdate = timestamp + timedelta(seconds=60)
         logging.info('successfully received data')
-        f = open(f"./scraping_data/rappid_test/{timestamp.isoformat()}.json", "w")
+        f = open(f"./scraping_data/{timestamp.isoformat()}.json", "w")
         f.write(response.text)
         f.close()
         logging.info('successfully written data to file')
