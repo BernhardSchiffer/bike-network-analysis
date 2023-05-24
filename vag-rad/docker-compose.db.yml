@@ -1,0 +1,19 @@
+version: "3.3"
+
+services:
+  cyberhike-db:
+    image: kartoza/postgis:9.6-2.4
+    container_name: vag-bike-db
+    restart: unless-stopped
+    volumes:
+      - vag_bike_db:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
+    ports:
+      - ${POSTGRES_PORT}:5432
+
+volumes:
+  vag_bike_db:
+    external: false

@@ -1,0 +1,1 @@
+delete from Bikes_Tmp where id = %s and "time" = %s;
