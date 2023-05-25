@@ -23,17 +23,30 @@ conn = psycopg2.connect(
     password=POSTGRES_PASSWORD,
     port=POSTGRES_PORT)
 
-sql = "select r.* from rides r where r.bike_id = '900405' order by r.starting_time;"
-finishing_pos_sql = "select r.id, r.finishing_position from rides r where r.bike_id = '900405' order by r.starting_time;"
-df = gpd.read_postgis(sql, conn, geom_col='starting_position', parse_dates='%Y-%m-%d %H:%M:%S')
-finishing_pos = gpd.read_postgis(finishing_pos_sql, conn, geom_col='finishing_position')
+bike_id = 900405
+sql = f"""select r.* from rides r 
+        where r.bike_id = '{bike_id}' 
+        order by r.starting_time;"""
+finishing_pos_sql = f"""select r.id, r.finishing_position from rides r
+                        where r.bike_id = '{bike_id}'
+                        order by r.starting_time;"""
+df = gpd.read_postgis(
+    sql, 
+    conn, 
+    geom_col='starting_position', 
+    parse_dates='%Y-%m-%d %H:%M:%S')
+
+finishing_pos = gpd.read_postgis(
+    finishing_pos_sql, 
+    conn, 
+    geom_col='finishing_position')
 df.drop('finishing_position', axis=1, inplace=True)
 df = df.merge(finishing_pos, on='id')
 conn.close()
+
 # %%
 df
 # %%
-
 map = folium.Map(location=[49.451900, 11.076608], zoom_start=12)
 
 for index, row in df.iterrows():
@@ -45,3 +58,5 @@ for index, row in df.iterrows():
     ).add_to(map)
 
 map
+
+# %%

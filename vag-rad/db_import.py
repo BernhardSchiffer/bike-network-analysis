@@ -142,13 +142,13 @@ def import_bike_records_from_file(filename):
 
     insert_list(insert_bikes_tmp_sql, bike_records)
 
-
 with ThreadPool(processes=os.cpu_count()) as pool:
     pool.map(import_bike_records_from_file, filenames)
 
 #%%
 # import unique bikes into separate table
-known_bikes_sql = "select bt.id, bt.vehicle_type_id from bikes_tmp bt group by bt.id, bt.vehicle_type_id;"
+known_bikes_sql = """select bt.id, bt.vehicle_type_id from bikes_tmp bt 
+                    group by bt.id, bt.vehicle_type_id;"""
 insert_bikes_sql = open("./sql/insert_bikes.sql", "r").read()
 
 conn = psycopg2.connect(
@@ -212,8 +212,14 @@ def calc_trips_for_bike_ids(bike_id):
         port=POSTGRES_PORT)
     cur = conn.cursor()
 
-    sql = f"select b.* from Bikes_Tmp b where b.id = '{bike_id}' order by b.""time"" asc;"
-    df = gpd.read_postgis(sql, conn, geom_col='position', parse_dates='%Y-%m-%d %H:%M:%S')
+    sql = f"""select b.* from Bikes_Tmp b 
+            where b.id = '{bike_id}' 
+            order by b.""time"" asc;"""
+    df = gpd.read_postgis(
+        sql, 
+        conn, 
+        geom_col='position', 
+        parse_dates='%Y-%m-%d %H:%M:%S')
 
     old_row = None
     for idx, row in df.iterrows():
