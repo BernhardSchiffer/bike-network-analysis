@@ -50,7 +50,7 @@ def insert_list(sql, entries, single_commit=False):
 
 #%%
 # Import stations from the latests scraped file
-path = './scraping_data/'
+path = './scraping_data/data/'
 filenames = os.listdir(path)
 filenames = [f for f in filenames if os.path.isfile(path+f)]
 filenames = sorted(filenames)
@@ -69,7 +69,7 @@ def import_stations_from_file(filename):
                 place['uid'],
                 place['name'],
                 place['number'],
-                f"POINT({place['lat']} {place['lng']})",
+                f"POINT({place['lng']} {place['lat']})",
                 place['bike_racks'],
                 place['special_racks']
             ))
@@ -103,7 +103,7 @@ insert_list(insert_bike_types_sql, bike_types, single_commit=True)
 #%%
 # Import all bikes from scraped files into an temporary db-table
 # Files get imported in parallel by multiple threads
-path = './scraping_data/'
+path = './scraping_data/data/'
 filenames = os.listdir(path)
 filenames = [f for f in filenames if os.path.isfile(path+f)]
 filenames = sorted(filenames)
@@ -120,7 +120,7 @@ def import_bike_records_from_file(filename):
     for place in data['countries'][0]['cities'][0]['places']:
         # bikes parked at stations
         if place['spot'] == True and place['bike'] == False:
-            position = f"POINT({place['lat']} {place['lng']})"
+            position = f"POINT({place['lng']} {place['lat']})"
             station_id = place['uid']
             for bike in place['bike_list']:
                 bike_records.append((
@@ -136,7 +136,7 @@ def import_bike_records_from_file(filename):
                 place['bike_list'][0]['number'],
                 place['bike_list'][0]['bike_type'],
                 time,
-                f"POINT({place['lat']} {place['lng']})",
+                f"POINT({place['lng']} {place['lat']})",
                 None
             ))
 
@@ -204,6 +204,7 @@ insert_ride_sql = open('./sql/insert_rides.sql', 'r').read()
 delete_bike_sql = open('./sql/delete_bike_by_time.sql', 'r').read()
 
 def calc_trips_for_bike_ids(bike_id):
+    print(f'bike-id: {bike_id}')
     conn = psycopg2.connect(
         host=POSTGRES_HOST,
         database=POSTGRES_DB,
@@ -211,10 +212,10 @@ def calc_trips_for_bike_ids(bike_id):
         password=POSTGRES_PASSWORD,
         port=POSTGRES_PORT)
     cur = conn.cursor()
+    rides = []
+    delete_bikes = []
 
-    sql = f"""select b.* from Bikes_Tmp b 
-            where b.id = '{bike_id}' 
-            order by b.""time"" asc;"""
+    sql = f"select b.* from Bikes_Tmp b where b.id = '{bike_id}' order by b.""time"" asc;"
     df = gpd.read_postgis(
         sql, 
         conn, 
@@ -240,22 +241,18 @@ def calc_trips_for_bike_ids(bike_id):
                 convert_float_to_int(old_row.get('station_id', None)),
                 convert_float_to_int(row.get('station_id', None)),
             )
-            try:
-                cur.execute(insert_ride_sql, ride)
-                cur.execute(delete_bike_sql, (bike_id, old_row['time'].isoformat()))
-            except psycopg2.IntegrityError:
-                conn.rollback()
-            else:
-                conn.commit()
-                old_row = row
-        else:
-            try:
-                cur.execute(delete_bike_sql, (bike_id, old_row['time'].isoformat()))
-            except psycopg2.IntegrityError:
-                conn.rollback()
-            else:
-                conn.commit()
-                old_row = row
+            rides.append(ride)
+
+        delete_bikes.append((bike_id, old_row['time'].isoformat()))
+        old_row = row
+    
+    try:
+        cur.executemany(insert_ride_sql, rides)
+        cur.executemany(delete_bike_sql, delete_bikes)
+    except psycopg2.IntegrityError:
+        conn.rollback()
+    else:
+        conn.commit()
     cur.close()
     conn.close()
 
