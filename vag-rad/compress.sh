@@ -1,0 +1,1 @@
+tar -czvf $(date --date="yesterday" +%Y-%m-%d).tar.gz $(date --date="yesterday" +%Y-%m-%d)T*.json --remove-files
