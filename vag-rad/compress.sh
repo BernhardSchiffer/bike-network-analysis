@@ -1,10 +1,12 @@
 #!/bin/bash
 
-d=$(date --date="yesterday" +%Y-%m-%d)
+date=$1 #$(date --date="yesterday" +%Y-%m-%d)
+input_dir=$(realpath $2)
+output_dir=$(realpath $3)
 
-if [ -f $d.tar.gz ]; then
-    echo "Oops! backup file for the $d was already here."
+if [ -e "$output_dir/$date.tar.gz" ]; then
+    echo "Oops! backup file for the $output_dir/$date was already here."
     exit
 fi
 
-tar -czvf $d.tar.gz $d*.json --remove-files
+$(cd $input_dir && tar -czvf "$output_dir/$date.tar.gz" $date*.json --remove-files)
