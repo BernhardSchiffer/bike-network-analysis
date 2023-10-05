@@ -1,0 +1,21 @@
+version: "3.3"
+
+services:
+  osm-nbg-db:
+    image: kartoza/postgis:9.6-2.4
+    container_name: osm-nbg-db
+    restart: unless-stopped
+    volumes:
+      - osm_nbg_db:/var/lib/postgresql/data:rw
+    environment:
+      POSTGRES_USER: ${OSM_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${OSM_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${OSM_POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data/
+      ALLOW_IP_RANGE: 0.0.0.0/0
+    ports:
+      - ${OSM_POSTGRES_PORT}:5432
+
+volumes:
+  osm_nbg_db:
+    external: false

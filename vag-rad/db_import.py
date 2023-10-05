@@ -34,14 +34,15 @@ def insert_list(sql, entries, single_commit=False):
         for entry in entries:
             try:
                 cur.execute(sql, entry)
-            except psycopg2.IntegrityError:
+            except psycopg2.IntegrityError as e:
                 conn.rollback()
             else:
                 conn.commit()
     else:
         try:
             cur.executemany(sql, entries)
-        except psycopg2.IntegrityError:
+        except psycopg2.IntegrityError as e:
+            print(e)
             conn.rollback()
         else:
             conn.commit()
@@ -50,16 +51,24 @@ def insert_list(sql, entries, single_commit=False):
 
 #%%
 # Import stations from the latests scraped file
+filenames = []
 path = './scraping_data/data/'
-filenames = os.listdir(path)
-filenames = [f for f in filenames if os.path.isfile(path+f)]
+for root, dirs, files in os.walk(path):
+    for file in files:
+        filenames.append(os.path.join(root, file))
+
 filenames = sorted(filenames)
 
 insert_stations_sql = open("./sql/insert_stations.sql", "r").read()
 
 def import_stations_from_file(filename):
-    f = open(f"{path}{filename}", "r")
-    data = json.load(f)
+    print(filename)
+    f = open(f"{filename}", "r")
+    try:
+        data = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f'Exception {e} while parsing {filename}')
+        return
     stations = []
 
     for place in data['countries'][0]['cities'][0]['places']:
@@ -76,7 +85,10 @@ def import_stations_from_file(filename):
 
     insert_list(insert_stations_sql, stations, single_commit=True)
 
-import_stations_from_file(filenames[-1])
+#import_stations_from_file(filenames[-1])
+
+with ThreadPool(processes=os.cpu_count()) as pool:
+    pool.map(import_stations_from_file, filenames)
 
 #%%
 # Get Bike-Types from api directly and import it into separate table
@@ -103,18 +115,23 @@ insert_list(insert_bike_types_sql, bike_types, single_commit=True)
 #%%
 # Import all bikes from scraped files into an temporary db-table
 # Files get imported in parallel by multiple threads
+filenames = []
 path = './scraping_data/data/'
-filenames = os.listdir(path)
-filenames = [f for f in filenames if os.path.isfile(path+f)]
-filenames = sorted(filenames)
+for root, dirs, files in os.walk(path):
+    for file in files:
+        filenames.append(os.path.join(root, file))
 
 insert_bikes_tmp_sql = open("./sql/insert_bike_records.sql", "r").read()
 
 def import_bike_records_from_file(filename):
     print(filename)
-    f = open(f"{path}{filename}", "r")
-    data = json.load(f)
-    time = filename.split('.')[0]
+    f = open(f"{filename}", "r")
+    try:
+        data = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f'Exception {e} while parsing {filename}')
+        return
+    time = filename.split('/')[-1][:-5]
     bike_records = []
 
     for place in data['countries'][0]['cities'][0]['places']:
@@ -193,7 +210,7 @@ conn = psycopg2.connect(
 cur = conn.cursor()
 
 # get all bike ids
-cur.execute('select id from bikes group by id;')
+cur.execute('select id from bikes_tmp group by id;')
 bike_ids = cur.fetchall()
 bike_ids = [id[0] for id in bike_ids]
 
@@ -249,14 +266,21 @@ def calc_trips_for_bike_ids(bike_id):
     try:
         cur.executemany(insert_ride_sql, rides)
         cur.executemany(delete_bike_sql, delete_bikes)
-    except psycopg2.IntegrityError:
+    except psycopg2.IntegrityError as e:
+        print(e)
         conn.rollback()
     else:
         conn.commit()
     cur.close()
     conn.close()
 
+#calc_trips_for_bike_ids('900956')
+
 with ThreadPool(processes=os.cpu_count()) as pool:
     pool.map(calc_trips_for_bike_ids, bike_ids)
 
 #%%
+filename = './scraping_data/data/2023-06-01/2023-06-01T14:02:37.689260+00:00.json'
+
+#time = filename.split('.')[0]
+filename.split('/')[-1][:-5]
