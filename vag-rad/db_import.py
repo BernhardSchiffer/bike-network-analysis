@@ -3,10 +3,14 @@ import psycopg2
 import os
 import json
 import geopandas as gpd
+import pandas as pd
 from geopy import distance
 from multiprocessing.pool import ThreadPool
 import requests
 from dotenv import load_dotenv
+import tarfile
+import datetime
+import shutil
 
 #%%
 # Setup environment
@@ -21,7 +25,7 @@ POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 #%%
 # Helperfunction to insert lists into the database
 # Possibility to commit entries individually
-def insert_list(sql, entries, single_commit=False):
+def insert_list(sql, entries, single_commit=False, verbose=False):
     conn = psycopg2.connect(
         host=POSTGRES_HOST,
         database=POSTGRES_DB,
@@ -35,6 +39,8 @@ def insert_list(sql, entries, single_commit=False):
             try:
                 cur.execute(sql, entry)
             except psycopg2.IntegrityError as e:
+                if verbose:
+                    print(e)
                 conn.rollback()
             else:
                 conn.commit()
@@ -42,27 +48,52 @@ def insert_list(sql, entries, single_commit=False):
         try:
             cur.executemany(sql, entries)
         except psycopg2.IntegrityError as e:
-            print(e)
+            if verbose:
+                print(e)
             conn.rollback()
         else:
             conn.commit()
     cur.close()
     conn.close()
 
+def convert_float_to_int(float_value):
+    try:
+        return int(float_value)
+    except:
+        return None
+
+# read files from archives
+def get_files_in_daterange(path: str, date_start = None, date_end = None):
+    file_names = []
+    if date_start is None:
+        start_date = datetime.datetime.min
+    else:
+        start_date = datetime.datetime.strptime(date_start, '%Y-%m-%d')
+
+    if date_end is None:
+        end_date = datetime.datetime.max
+    else:
+        end_date = datetime.datetime.strptime(date_end, '%Y-%m-%d')
+
+    timestamp_pattern='%Y-%m-%d.tar.gz'
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            if file.endswith('.tar.gz'):
+                file_date = datetime.datetime.strptime(file, timestamp_pattern)
+                if start_date <= file_date <= end_date:
+                    file_names.append(os.path.join(root, file))
+    return file_names
+
+def extract_archive_to_dir(archive: str, directory_path: str):
+    with tarfile.open(archive, 'r:*') as r:
+        r.extractall(directory_path)
+
 #%%
 # Import stations from the latests scraped file
-filenames = []
-path = './scraping_data/data/'
-for root, dirs, files in os.walk(path):
-    for file in files:
-        filenames.append(os.path.join(root, file))
-
-filenames = sorted(filenames)
-
-insert_stations_sql = open("./sql/insert_stations.sql", "r").read()
+insert_stations_tmp_sql = open("./sql/insert_stations_tmp.sql", "r").read()
 
 def import_stations_from_file(filename):
-    print(filename)
+    print(f"insert station records from: {filename}")
     f = open(f"{filename}", "r")
     try:
         data = json.load(f)
@@ -70,6 +101,7 @@ def import_stations_from_file(filename):
         print(f'Exception {e} while parsing {filename}')
         return
     stations = []
+    time = filename.split('/')[-1][:-5]
 
     for place in data['countries'][0]['cities'][0]['places']:
         # stations
@@ -80,15 +112,11 @@ def import_stations_from_file(filename):
                 place['number'],
                 f"POINT({place['lng']} {place['lat']})",
                 place['bike_racks'],
-                place['special_racks']
+                place['special_racks'],
+                time
             ))
 
-    insert_list(insert_stations_sql, stations, single_commit=True)
-
-#import_stations_from_file(filenames[-1])
-
-with ThreadPool(processes=os.cpu_count()) as pool:
-    pool.map(import_stations_from_file, filenames)
+    insert_list(insert_stations_tmp_sql, stations, single_commit=False)
 
 #%%
 # Get Bike-Types from api directly and import it into separate table
@@ -113,18 +141,29 @@ insert_bike_types_sql = f.read()
 insert_list(insert_bike_types_sql, bike_types, single_commit=True)
 
 #%%
+def file_key(filename):
+    return filename.split('/')[-1][:-5]
+#%%
 # Import all bikes from scraped files into an temporary db-table
 # Files get imported in parallel by multiple threads
+directory = './scraping_data/'
+path = './scraping_data/tmp'
+
+file_names = get_files_in_daterange(directory, date_start='2023-08-01', date_end='2023-09-30')
+for f in file_names:
+    extract_archive_to_dir(f, path)
+
 filenames = []
-path = './scraping_data/data/'
 for root, dirs, files in os.walk(path):
     for file in files:
         filenames.append(os.path.join(root, file))
 
+filenames.sort(key=file_key)
+
 insert_bikes_tmp_sql = open("./sql/insert_bike_records.sql", "r").read()
 
 def import_bike_records_from_file(filename):
-    print(filename)
+    print(f"insert bike records from: {filename}")
     f = open(f"{filename}", "r")
     try:
         data = json.load(f)
@@ -158,14 +197,59 @@ def import_bike_records_from_file(filename):
             ))
 
     insert_list(insert_bikes_tmp_sql, bike_records)
+#print('insert bike records')
+#with ThreadPool(processes=os.cpu_count()) as pool:
+#    pool.map(import_bike_records_from_file, filenames)
 
+print('insert station records')
 with ThreadPool(processes=os.cpu_count()) as pool:
-    pool.map(import_bike_records_from_file, filenames)
+    pool.map(import_stations_from_file, filenames)
+
+def handler(func, path, exc_info):
+    print("Inside handler")
+    print(exc_info)
+
+shutil.rmtree(path, onerror=handler)
+
+#%%
+# import unique stations into separate table
+known_stations_sql = """select distinct on (st.station_id, st."name", st.short_name, st."position", st.bike_racks, st.special_racks) st.station_id, st."name", st.short_name, st."position", st.bike_racks, st.special_racks, st.created_at 
+                        from stations_tmp st
+                        order by st.station_id, st."name", st.short_name, st."position", st.bike_racks, st.special_racks, st.created_at asc;"""
+insert_stations_sql = open("./sql/insert_stations.sql", "r").read()
+
+conn = psycopg2.connect(
+    host=POSTGRES_HOST,
+    database=POSTGRES_DB,
+    user=POSTGRES_USER,
+    password=POSTGRES_PASSWORD,
+    port=POSTGRES_PORT)
+cur = conn.cursor()
+
+cur.execute(known_stations_sql)
+stations = [(res[0], res[1], res[2], res[3], res[4], res[5], res[6]) for res in cur.fetchall()]
+
+insert_list(insert_stations_sql, stations, single_commit=True)
+
+# delete unnecessary entires in stations_tmp
+delete_stations_tmp = f"""delete from stations_tmp
+                        where station_id in ({', '.join(map(str, [s[0] for s in stations]))})"""
+
+try:
+    cur.execute(delete_stations_tmp)
+except psycopg2.IntegrityError as e:
+    print(e)
+    conn.rollback()
+else:
+    conn.commit()
+
+cur.close()
+conn.close()
 
 #%%
 # import unique bikes into separate table
-known_bikes_sql = """select bt.id, bt.vehicle_type_id from bikes_tmp bt 
-                    group by bt.id, bt.vehicle_type_id;"""
+known_bike_ids_sql = """select distinct bt.id
+                        from bikes_tmp bt;"""
 insert_bikes_sql = open("./sql/insert_bikes.sql", "r").read()
 
 conn = psycopg2.connect(
@@ -176,26 +260,41 @@ conn = psycopg2.connect(
     port=POSTGRES_PORT)
 cur = conn.cursor()
 
-cur.execute(known_bikes_sql)
-bikes = [(res[0], res[1]) for res in cur.fetchall()]
-
-for bike in bikes:
-    try:
-        cur.execute(insert_bikes_sql, bike)
-    except psycopg2.IntegrityError:
-        conn.rollback()
-    else:
-        conn.commit()
+cur.execute(known_bike_ids_sql)
+bike_ids = [res[0] for res in cur.fetchall()]
 
 cur.close()
 conn.close()
 
-# %%
-def convert_float_to_int(float_value):
-    try:
-        return int(float_value)
-    except:
-        return None
+def insert_unique_bikes(bike_id):
+    print(bike_id)
+
+    conn = psycopg2.connect(
+        host=POSTGRES_HOST,
+        database=POSTGRES_DB,
+        user=POSTGRES_USER,
+        password=POSTGRES_PASSWORD,
+        port=POSTGRES_PORT)
+
+    bikes_df = pd.read_sql(
+        f"""select bt.id, bt.vehicle_type_id, bt."time"
+            from bikes_tmp bt 
+            where bt.id = '{bike_id}'
+            order by bt."time" asc;""", 
+        conn,
+        parse_dates='%Y-%m-%d %H:%M:%S')
+
+    conn.close()
+
+    tmp_df = bikes_df.drop_duplicates(subset=['id', 'vehicle_type_id'], keep='first')
+    unique_bikes = [(t[0], t[1], t[2]) for t in tmp_df.values]
+
+    insert_list(insert_bikes_sql, unique_bikes, single_commit=True)
+
+print('insert unique bike records')
+with ThreadPool(processes=os.cpu_count()) as pool:
+    pool.map(insert_unique_bikes, bike_ids)
+
 # %%
 # Calculate trips for every bike out of scraped data
 # Bike records getting deleted after successful trip computation
@@ -210,9 +309,11 @@ conn = psycopg2.connect(
 cur = conn.cursor()
 
 # get all bike ids
-cur.execute('select id from bikes_tmp group by id;')
+cur.execute('select distinct b.bike_id from bikes b limit 100;')
 bike_ids = cur.fetchall()
 bike_ids = [id[0] for id in bike_ids]
+
+print(bike_ids)
 
 cur.close()
 conn.close()
@@ -228,7 +329,6 @@ def calc_trips_for_bike_ids(bike_id):
         user=POSTGRES_USER,
         password=POSTGRES_PASSWORD,
         port=POSTGRES_PORT)
-    cur = conn.cursor()
     rides = []
     delete_bikes = []
 
@@ -238,6 +338,19 @@ def calc_trips_for_bike_ids(bike_id):
         conn, 
         geom_col='position', 
         parse_dates='%Y-%m-%d %H:%M:%S')
+    
+    stations_df = gpd.read_postgis(
+        f"select s.* from Stations s", 
+        conn, 
+        geom_col='position', 
+        parse_dates='%Y-%m-%d %H:%M:%S')
+    
+    bike_df = pd.read_sql(
+        f"select b.* from Bikes b where b.bike_id = '{bike_id}'", 
+        conn,
+        parse_dates='%Y-%m-%d %H:%M:%S')
+    
+    conn.close()
 
     old_row = None
     for idx, row in df.iterrows():
@@ -248,39 +361,59 @@ def calc_trips_for_bike_ids(bike_id):
         if(distance.distance(
             (old_row['position'].x, old_row['position'].y), 
             (row['position'].x, row['position'].y)).meters > 0.0):
+
+            station_id_start = convert_float_to_int(old_row.get('station_id', None))
+            station_id_end = convert_float_to_int(row.get('station_id', None))
+
+            if station_id_start is not None:
+                filtered = stations_df.query(f'station_id == {station_id_start} and first_seen <= "{old_row["time"].isoformat()}"')
+                station_id_start = filtered.sort_values(by=['first_seen'], ascending=True).tail(1)['id'].item()
+            if station_id_end is not None:
+                filtered = stations_df.query(f'station_id == {station_id_end} and first_seen <= "{row["time"].isoformat()}"')
+                station_id_end = filtered.sort_values(by=['first_seen'], ascending=True).tail(1)['id'].item()
         
+            filtered = bike_df.query(f'first_seen <= "{old_row["time"].isoformat()}"')
+            unique_bike_id = filtered.sort_values(by=['first_seen'], ascending=True).tail(1)['id'].item()
+
             ride = (
-                bike_id,
+                unique_bike_id,
                 old_row['time'].isoformat(),
                 row['time'].isoformat(),
                 str(old_row['position']),
                 str(row['position']),
-                convert_float_to_int(old_row.get('station_id', None)),
-                convert_float_to_int(row.get('station_id', None)),
+                station_id_start,
+                station_id_end
             )
             rides.append(ride)
 
         delete_bikes.append((bike_id, old_row['time'].isoformat()))
         old_row = row
     
-    try:
-        cur.executemany(insert_ride_sql, rides)
-        cur.executemany(delete_bike_sql, delete_bikes)
-    except psycopg2.IntegrityError as e:
-        print(e)
-        conn.rollback()
-    else:
-        conn.commit()
-    cur.close()
-    conn.close()
+    insert_list(insert_ride_sql, rides, single_commit=True, verbose=True)
+    insert_list(delete_bike_sql, delete_bikes)
 
-#calc_trips_for_bike_ids('900956')
+#calc_trips_for_bike_ids('900005')
 
 with ThreadPool(processes=os.cpu_count()) as pool:
     pool.map(calc_trips_for_bike_ids, bike_ids)
 
 #%%
-filename = './scraping_data/data/2023-06-01/2023-06-01T14:02:37.689260+00:00.json'
+conn = psycopg2.connect(
+    host=POSTGRES_HOST,
+    database=POSTGRES_DB,
+    user=POSTGRES_USER,
+    password=POSTGRES_PASSWORD,
+    port=POSTGRES_PORT)
+bike_id = '900005'
 
-#time = filename.split('.')[0]
-filename.split('/')[-1][:-5]
+bike_df = pd.read_sql(
+    f"select b.* from Bikes b where b.bike_id = '{bike_id}'", 
+    conn,
+    parse_dates='%Y-%m-%d %H:%M:%S')
+
+conn.close()
+
+bike_df
+#%%
+filtered = bike_df.query(f'first_seen <= "2023-10-23 13:06:02.819823"')
+filtered.sort_values(by=['first_seen'], ascending=True).tail(1)['id'].item()

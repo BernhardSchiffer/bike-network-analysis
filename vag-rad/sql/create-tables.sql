@@ -7,13 +7,35 @@ CREATE TABLE Bikes_Tmp (
     primary key (id, time)
 );
 
-CREATE TABLE Stations (
-    id int primary key,
+CREATE INDEX idx_bikes_tmp_id
+ON Bikes_Tmp(id);
+
+CREATE INDEX idx_bikes_tmp_time 
+ON Bikes_Tmp(time ASC);
+
+CREATE TABLE Stations_Tmp (
+    station_id int not null,
     name text,
     short_name text,
     position geography(POINT,4326) not null,
     bike_racks int not null,
-    special_racks int not null
+    special_racks int not null,
+    created_at timestamp not null
+);
+
+CREATE INDEX idx_stations_tmp 
+ON Stations_Tmp(station_id);
+
+CREATE TABLE Stations (
+    id serial primary key,
+    station_id int not null,
+    name text,
+    short_name text,
+    position geography(POINT,4326) not null,
+    bike_racks int not null,
+    special_racks int not null,
+    first_seen timestamp not null,
+    unique (station_id, name, short_name, position, bike_racks, special_racks)
 );
 
 CREATE TABLE Bike_Types (
@@ -27,17 +49,22 @@ CREATE TABLE Bike_Types (
 );
 
 CREATE TABLE Bikes (
-    id text not null,
+    id serial primary key,
+    bike_id text not null,
     vehicle_type_id int,
-    primary key (id),
+    first_seen timestamp not null,
+    unique (bike_id, vehicle_type_id),
     foreign key (vehicle_type_id) 
         references bike_types (id)
         on delete set null
 );
 
+CREATE INDEX idx_bikes_bike_id 
+ON Bikes(bike_id);
+
 CREATE TABLE Rides (
     id serial not null,
-    bike_id text,
+    bike_id int not null,
     starting_time timestamp not null,
     finishing_time timestamp not null,
     starting_position geography(POINT,4326) not null,
@@ -45,6 +72,7 @@ CREATE TABLE Rides (
     starting_station_id int,
     finishing_station_id int,
     primary key (id),
+    unique (bike_id, starting_time),
     foreign key (bike_id) 
         references bikes (id)
         on delete set null,
@@ -55,3 +83,6 @@ CREATE TABLE Rides (
         references stations (id)
         on delete set null
 );
+
+CREATE INDEX idx_rides_bike_id 
+ON Rides(bike_id);

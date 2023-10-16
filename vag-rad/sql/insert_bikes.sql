@@ -1,2 +1,2 @@
-insert into Bikes (id, vehicle_type_id)
-values (%s, %s);
+insert into Bikes (bike_id, vehicle_type_id, first_seen)
+values (%s, %s, %s);
