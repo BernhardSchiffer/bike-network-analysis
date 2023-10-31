@@ -2,9 +2,9 @@ version: "3.3"
 
 services:
   vag-rad-db:
-    image: kartoza/postgis:9.6-2.4
+    image: postgis/postgis:16-master
     container_name: vag-bike-db
-    restart: unless-stopped
+    shm_size: 2gb
     volumes:
       - vag_bike_db:/var/lib/postgresql/data:rw
     environment:
@@ -17,4 +17,4 @@ services:
 
 volumes:
   vag_bike_db:
-    external: false
+    external: true

@@ -149,7 +149,7 @@ def file_key(filename):
 directory = './scraping_data/'
 path = './scraping_data/tmp'
 
-file_names = get_files_in_daterange(directory, date_start='2023-08-01', date_end='2023-09-30')
+file_names = get_files_in_daterange(directory, date_start='2023-07-01', date_end='2023-09-30')
 for f in file_names:
     extract_archive_to_dir(f, path)
 
@@ -197,9 +197,9 @@ def import_bike_records_from_file(filename):
             ))
 
     insert_list(insert_bikes_tmp_sql, bike_records)
-#print('insert bike records')
-#with ThreadPool(processes=os.cpu_count()) as pool:
-#    pool.map(import_bike_records_from_file, filenames)
+print('insert bike records')
+with ThreadPool(processes=os.cpu_count()) as pool:
+    pool.map(import_bike_records_from_file, filenames)
 
 print('insert station records')
 with ThreadPool(processes=os.cpu_count()) as pool:
@@ -309,7 +309,10 @@ conn = psycopg2.connect(
 cur = conn.cursor()
 
 # get all bike ids
-cur.execute('select distinct b.bike_id from bikes b limit 100;')
+cur.execute("""select bt.id, count(bt.id) as anzahl
+                from bikes_tmp bt
+                group by bt.id
+                order by anzahl desc""")
 bike_ids = cur.fetchall()
 bike_ids = [id[0] for id in bike_ids]
 

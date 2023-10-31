@@ -26,11 +26,13 @@ conn = psycopg2.connect(
     port=POSTGRES_PORT)
 
 bike_id = 901857
-sql = f"""select r.* from rides r 
-        where r.bike_id = '{bike_id}' 
+sql = f"""select r.* from rides r
+        join bikes b on r.bike_id = b.id
+        where b.bike_id = '{bike_id}' 
         order by r.starting_time;"""
 finishing_pos_sql = f"""select r.id, r.finishing_position from rides r
-                        where r.bike_id = '{bike_id}'
+                        join bikes b on r.bike_id = b.id
+                        where b.bike_id = '{bike_id}'
                         and ST_Distance(r.starting_position, r.finishing_position) >= 150
                         order by r.starting_time;"""
 
@@ -107,7 +109,7 @@ conn = psycopg2.connect(
     password=POSTGRES_PASSWORD,
     port=POSTGRES_PORT)
 
-df = pd.read_sql_query('select ST_Distance(r.starting_position, r.finishing_position) as dist from rides r where ST_Distance(r.starting_position, r.finishing_position) < 10000 order by dist desc;',con=conn)
+df = pd.read_sql_query('select ST_Distance(r.starting_position, r.finishing_position) as dist from rides r order by dist desc;',con=conn)
 
 conn.close()
 
@@ -117,5 +119,31 @@ df['Distances'] = pd.qcut(df['dist'], [0, 0.25, 0.5, 0.75, 1])
 print(df.head())
 
 plt.figure();
-df['dist'][:].plot.hist(bins=200, logy=False)
+df['dist'][:].plot.hist(bins=200, logy=False, logx=False)
+
+plt.figure();
+df['dist'][:].plot.hist(bins=200, logy=True, logx=True)
+
 # %%
+conn = psycopg2.connect(
+    host=POSTGRES_HOST,
+    database=POSTGRES_DB,
+    user=POSTGRES_USER,
+    password=POSTGRES_PASSWORD,
+    port=POSTGRES_PORT)
+
+df = pd.read_sql_query('select ST_Distance(r.starting_position, r.finishing_position) as dist from rides r where ST_Distance(r.starting_position, r.finishing_position) < 20000 order by dist desc;',con=conn)
+
+conn.close()
+
+df
+
+df['Distances'] = pd.qcut(df['dist'], [0, 0.25, 0.5, 0.75, 1])
+print(df.head())
+
+plt.figure();
+df['dist'][:].plot.hist(bins=200, logy=True)
+# %%
+
+plt.figure();
+df['dist'][:].plot.hist(bins=100, logy=True)
