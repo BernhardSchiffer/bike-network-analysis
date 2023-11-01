@@ -6,6 +6,7 @@ services:
     container_name: vag-bike-db
     shm_size: 2gb
     volumes:
+      - ./dump:/dumpfiles
       - vag_bike_db:/var/lib/postgresql/data:rw
     environment:
       POSTGRES_USER: ${POSTGRES_USER}

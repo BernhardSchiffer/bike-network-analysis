@@ -4,3 +4,4 @@
 scraping_data/
 logs/
 cache/
+dump/*.dat*
