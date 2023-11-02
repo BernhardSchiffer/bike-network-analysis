@@ -198,11 +198,11 @@ def import_bike_records_from_file(filename):
 
     insert_list(insert_bikes_tmp_sql, bike_records)
 print('insert bike records')
-with ThreadPool(processes=os.cpu_count()) as pool:
+with ThreadPool(processes=os.cpu_count()*2) as pool:
     pool.map(import_bike_records_from_file, filenames)
 
 print('insert station records')
-with ThreadPool(processes=os.cpu_count()) as pool:
+with ThreadPool(processes=os.cpu_count()*2) as pool:
     pool.map(import_stations_from_file, filenames)
 
 def handler(func, path, exc_info):
@@ -292,7 +292,7 @@ def insert_unique_bikes(bike_id):
     insert_list(insert_bikes_sql, unique_bikes, single_commit=True)
 
 print('insert unique bike records')
-with ThreadPool(processes=os.cpu_count()) as pool:
+with ThreadPool(processes=os.cpu_count()*2) as pool:
     pool.map(insert_unique_bikes, bike_ids)
 
 # %%
@@ -397,7 +397,7 @@ def calc_trips_for_bike_ids(bike_id):
 
 #calc_trips_for_bike_ids('900005')
 
-with ThreadPool(processes=os.cpu_count()) as pool:
+with ThreadPool(processes=os.cpu_count()*2) as pool:
     pool.map(calc_trips_for_bike_ids, bike_ids)
 
 #%%

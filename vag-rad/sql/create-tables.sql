@@ -20,7 +20,8 @@ CREATE TABLE Stations_Tmp (
     position geography(POINT,4326) not null,
     bike_racks int not null,
     special_racks int not null,
-    created_at timestamp not null
+    created_at timestamp not null,
+    primary key (station_id, created_at)
 );
 
 CREATE INDEX idx_stations_tmp 
