@@ -1,1 +1,1 @@
-pg_restore -d vag-rad -U admin -W -Fd dumpfiles/
+pg_restore -d vag-bike -U admin -W -Fd dumpfiles/

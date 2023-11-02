@@ -1,1 +1,1 @@
-pg_dump -d vag-rad -U admin -W -t Stations -t Bikes -t Bike_Types -t Bikes_Tmp -t Stations_Tmp -t Rides -Fd -f dumpfiles
+pg_dump -d vag-bike -U admin -W -Fd -f dumpfiles
