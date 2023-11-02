@@ -1,0 +1,1 @@
+pg_restore -d vag-rad -U admin -W -Fd dumpfiles/
