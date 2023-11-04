@@ -6,6 +6,7 @@ import os
 from dotenv import load_dotenv
 import pandas as pd
 import matplotlib.pyplot as plt
+import datetime
 
 #%%
 # Setup environment
@@ -147,3 +148,71 @@ df['dist'][:].plot.hist(bins=200, logy=True)
 
 plt.figure();
 df['dist'][:].plot.hist(bins=100, logy=True)
+
+# %%
+conn = psycopg2.connect(
+    host=POSTGRES_HOST,
+    database=POSTGRES_DB,
+    user=POSTGRES_USER,
+    password=POSTGRES_PASSWORD,
+    port=POSTGRES_PORT)
+
+df = pd.read_sql_query("""select ST_Distance(r.starting_position, r.finishing_position) as dist from rides r 
+                       where ST_Distance(r.starting_position, r.finishing_position) < 20000 
+                       and ST_Distance(r.starting_position, r.finishing_position) > 150 
+                       order by dist desc;"""
+                       ,con=conn)
+
+conn.close()
+df
+
+plt.figure();
+df['dist'][:].plot.hist(bins=200, logy=False)
+
+# %%
+conn = psycopg2.connect(
+    host=POSTGRES_HOST,
+    database=POSTGRES_DB,
+    user=POSTGRES_USER,
+    password=POSTGRES_PASSWORD,
+    port=POSTGRES_PORT)
+
+df_rides_per_day = pd.read_sql_query("""select r.starting_time::date, count(*) from rides r 
+                        where ST_Distance(r.starting_position, r.finishing_position) < 20000
+                        and ST_Distance(r.starting_position, r.finishing_position) > 150 
+                        group by r.starting_time::date
+                        order by r.starting_time::date;"""
+                       ,con=conn)
+
+conn.close()
+df_rides_per_day
+# %%
+# calculating ticks on x axis
+d1 = df_rides_per_day['starting_time'].values[0]
+print(f'first date in dataframe: {d1.isoformat()}')
+d1 = d1 - datetime.timedelta(days=d1.weekday())
+print(f'monday before:\t\t {d1.isoformat()}')
+
+d2 = df_rides_per_day['starting_time'].values[-1]
+print(f'last date in dataframe:\t {d2.isoformat()}')
+d2 = d2 + datetime.timedelta(days=(7 - d2.weekday()))
+print(f'monday after:\t\t {d2.isoformat()}')
+
+x_ticks = pd.date_range(start=d1, end=d2, freq=datetime.timedelta(days=7)).tolist()
+
+ax = df_rides_per_day.plot(x='starting_time', y='count', linestyle='--', marker='o', grid=True, figsize=(20, 4))
+ax.set_xlabel('days')
+ax.set_ylabel('number of rides per day')
+plt.xticks(x_ticks, rotation=45)
+
+plt.show()
+
+# %%
+# some stats about the ride distribution
+print(f'min:\t {df_rides_per_day["count"].min()} on {df_rides_per_day["starting_time"][df_rides_per_day["count"].idxmin()].isoformat()}')
+print(f'max:\t {df_rides_per_day["count"].max()} on {df_rides_per_day["starting_time"][df_rides_per_day["count"].idxmax()].isoformat()}')
+print(f'mean:\t {df_rides_per_day["count"].mean()}')
+print(f'median:\t {df_rides_per_day["count"].median()}')
+
+df_rides_per_day.boxplot()
+plt.show()
