@@ -182,8 +182,8 @@ conn = psycopg2.connect(
 df_rides_per_day = pd.read_sql_query("""select r.starting_time::date, count(*) from rides r 
                         where ST_Distance(r.starting_position, r.finishing_position) < 20000
                         and ST_Distance(r.starting_position, r.finishing_position) > 150 
-                        and r.starting_time::date != '2023-10-10'
-                        and r.starting_time::date != '2023-10-11'
+                        and not (r.starting_time::date = '2023-10-10'
+                        or r.starting_time::date = '2023-10-11')
                         group by r.starting_time::date
                         order by r.starting_time::date;"""
                        ,con=conn)
