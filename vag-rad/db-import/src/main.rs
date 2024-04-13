@@ -1,11 +1,11 @@
-use std::{fs::{self, File}, io::{BufReader, Error}, path::{Path, PathBuf}, sync::Arc, thread, time::Duration};
+use std::{fs::{self, File}, io::BufReader, path::{Path, PathBuf}, thread, time::Duration};
 
 use chrono::{DateTime, Utc};
+use crossbeam::channel::unbounded;
 use dotenv::dotenv;
-use futures::stream::FuturesUnordered;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use models::{bike_tmp_record::BikeTmpRecord, station_tmp_record::StationTmpRecord};
 use postgis::twkb::Point;
-use tokio::sync::Semaphore;
 use zip_extensions::zip_extract;
 use threadpool::ThreadPool;
 use sqlx::{postgres::{PgConnectOptions, PgPoolOptions}, Pool, Postgres};
@@ -13,60 +13,128 @@ use sqlx::{postgres::{PgConnectOptions, PgPoolOptions}, Pool, Postgres};
 use crate::models::scraping_file::VagScrapingFile;
 mod models;
 
-#[tokio::main]
-async fn main() {
-
+fn main() {
     use std::time::Instant;
     let now = Instant::now();
-
-    // Code block to measure.
+    // Code block to measure runtime.
     {
-        let count = thread::available_parallelism().unwrap().get();
-        println!("running process on {} cores", count);
-        let pool = ThreadPool::new(count);
+        let core_count = thread::available_parallelism().unwrap().get();
+        println!("running process on {} cores", core_count);
         
-        let paths = fs::read_dir("../scraping_data").unwrap();
-        let working_dir = "../scraping_data/tmp";
-        
-        println!("extract files");
+        let paths = fs::read_dir("./scraping_data").unwrap();
+        let working_dir = "./scraping_data/tmp";
+
+        // setup progressbars
+        let progress_bars = MultiProgress::new();
+        let sty = ProgressStyle::with_template(
+            "[{elapsed_precise}] {bar:60.white/blue} {pos:>7}/{len:7} {msg}",
+        )
+        .unwrap();
+
+        let num_of_archives = fs::read_dir("./scraping_data").unwrap().count();
+        let extract_files_pb = progress_bars.add(ProgressBar::new(num_of_archives as u64));
+        extract_files_pb.set_style(sty.clone());
+        extract_files_pb.set_message("extract files");
+
+        let pool = ThreadPool::new(core_count);
         for path in paths {
-            pool.execute(|| {
-                decompress_files(path.unwrap().path(), Path::new(working_dir).to_path_buf());
+            let extract_files_pb = extract_files_pb.clone();
+            pool.execute(move || {
+                // decompress_files(path.unwrap().path(), Path::new(working_dir).to_path_buf());
+                extract_files_pb.inc(1);
             })
         }
         pool.join();
+        extract_files_pb.finish_with_message("✅ successfully extracted files");
 
-        let db_pool = connect().await.unwrap();
-        // let insert_bike_tmp_sql = fs::read_to_string("../sql/insert_bike_records.sql").unwrap();
-        // let insert_station_tmp_sql = fs::read_to_string("../sql/insert_stations_records.sql").unwrap();
+        let num_of_files = fs::read_dir(working_dir).unwrap().count();
+        
+        let file_read_pb = progress_bars.add(ProgressBar::new(num_of_files as u64));
+        file_read_pb.set_style(sty.clone());
+        file_read_pb.set_message("read files");
 
+        let bike_import_pb = progress_bars.add(ProgressBar::new(num_of_files as u64));
+        bike_import_pb.set_style(sty.clone());
+        bike_import_pb.set_message("import temporary bike records");
+
+        let station_import_pb = progress_bars.add(ProgressBar::new(num_of_files as u64));
+        station_import_pb.set_style(sty.clone());
+        station_import_pb.set_message("import temporary station records");
+
+        // setup producer and receivers
+        let (bikes_producer, bikes_receiver) = unbounded();
+        let (stations_producer, stations_receiver) = unbounded();
         let paths = fs::read_dir(working_dir).unwrap();
-        let sem = Arc::new(Semaphore::new(100));
-        let tasks = FuturesUnordered::new();
+    
+        let producer_thread = thread::spawn(move || {
+            let producer_thread_pool = ThreadPool::new(core_count);
+            for path in paths {
+                let bp = bikes_producer.clone();
+                let sp = stations_producer.clone();
+                let file_read_pb = file_read_pb.clone();
+                producer_thread_pool.execute(move || {
+                    let path = &path.unwrap().path();
+                    let scraping_file = read_scraping_file(path);
+                    let time = get_timestamp_from_filename(path);
+                    let bikes = get_bikes(&scraping_file, time);
+                    // println!("send {} bike records", bikes.len());
+                    bp.send(bikes).unwrap();
+                    let stations = get_stations(&scraping_file, time);
+                    // println!("send {} station records", stations.len());
+                    sp.send(stations).unwrap();
+                    file_read_pb.inc(1);
+                });
+            }
+            producer_thread_pool.join();
+            file_read_pb.finish_with_message("✅ read all files");
+        });
 
-        for path in paths {
-            let pool_clone = db_pool.clone();
-            let permit = Arc::clone(&sem).acquire_owned().await;
-            tasks.push(tokio::spawn(async move {
-                let _permit = permit;
-                let path = &path.unwrap();
-                //println!("read file {}", path.path().display());
-                let scraping_file = read_scraping_file(path.path());
-                let tmp = path.path().clone();
-                let filename = tmp.as_path().file_stem().unwrap().to_str().unwrap();
-                //println!("{}", filename);
-                let time: DateTime<Utc> = DateTime::parse_from_rfc3339(&filename).unwrap().with_timezone(&Utc);
-                let bikes = get_bikes(scraping_file.as_ref().unwrap(), time).await;
-                let _stations = get_stations(scraping_file.as_ref().unwrap(), time);
-                //println!("found {} bikes", bikes.len());
-                insert_bike_records(bikes, pool_clone).await;
-            }));
-        }
-        db_pool.close().await;
+        let bike_receiver_thread = thread::spawn(move || {
+            let bike_receiver_thread_pool = ThreadPool::new(core_count);
+            // let db_pool = connect().await.unwrap();
+            // db_pool.close().await;
+            for bikes in bikes_receiver {
+                let bike_import_pb = bike_import_pb.clone();
+                bike_receiver_thread_pool.execute(move || {
+                    // println!("import {} bike records", bikes.len());
+                    bike_import_pb.inc(1);
+                });
+            }
+            bike_receiver_thread_pool.join();
+            bike_import_pb.finish_with_message("✅ finished bike records db import");
+        });
+
+        let station_receiver_thread = thread::spawn(move || {
+            let station_receiver_thread_pool = ThreadPool::new(core_count);
+            // let db_pool = connect().await.unwrap();
+            // db_pool.close().await;
+            for stations in stations_receiver {
+                let station_import_pb = station_import_pb.clone();
+                station_receiver_thread_pool.execute(move || {
+                    // println!("import {} station records", stations.len());
+                    station_import_pb.inc(1);
+                });
+            }
+            station_receiver_thread_pool.join();
+            station_import_pb.finish_with_message("✅ finished station records db import");
+        });
+        
+        producer_thread.join().unwrap();
+        bike_receiver_thread.join().unwrap();
+        station_receiver_thread.join().unwrap();
     }
 
     let elapsed = now.elapsed();
     println!("Elapsed: {:.2?}", elapsed);
+}
+
+fn get_timestamp_from_filename(path: &Path) -> DateTime<Utc> {
+    let filename = path.file_stem().unwrap().to_str().unwrap();
+    let time = match DateTime::parse_from_rfc3339(&filename) {
+        Ok(time) => time.with_timezone(&Utc),
+        Err(e) => panic!("error occured while parsing {}. ({})", filename, e),
+    };
+    return time;
 }
 
 fn decompress_files(archive: PathBuf, target_dir: PathBuf) {
@@ -74,15 +142,14 @@ fn decompress_files(archive: PathBuf, target_dir: PathBuf) {
     zip_extract(&archive, &target_dir).unwrap();
 }
 
-fn read_scraping_file<P: AsRef<Path>>(path: P) -> Result<VagScrapingFile, Error> {
+fn read_scraping_file(path: &Path) -> VagScrapingFile {
     let file = File::open(path).unwrap();
     let reader = BufReader::new(file);
-
     let scraping_file: VagScrapingFile = serde_json::from_reader(reader).unwrap();
-    Ok(scraping_file)
+    return scraping_file;
 }
 
-async fn get_bikes(scraping_file: &VagScrapingFile, time: DateTime<Utc>) -> Vec<BikeTmpRecord> {
+fn get_bikes(scraping_file: &VagScrapingFile, time: DateTime<Utc>) -> Vec<BikeTmpRecord> {
     let mut bikes: Vec<BikeTmpRecord> = Vec::new();
     for country in &scraping_file.countries {
         for city in &country.cities {
