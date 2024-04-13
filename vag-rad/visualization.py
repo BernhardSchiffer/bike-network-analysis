@@ -180,6 +180,8 @@ conn = psycopg2.connect(
 df_rides_per_day = pd.read_sql_query("""select r.starting_time::date, count(*) from rides r 
                         where ST_Distance(r.starting_position, r.finishing_position) < 20000
                         and ST_Distance(r.starting_position, r.finishing_position) > 150 
+                        and not (r.starting_time::date = '2023-10-10'
+                        or r.starting_time::date = '2023-10-11')
                         group by r.starting_time::date
                         order by r.starting_time::date;"""
                        ,con=conn)
@@ -216,3 +218,35 @@ print(f'median:\t {df_rides_per_day["count"].median()}')
 
 df_rides_per_day.boxplot()
 plt.show()
+
+# %%
+
+conn = psycopg2.connect(
+    host=POSTGRES_HOST,
+    database=POSTGRES_DB,
+    user=POSTGRES_USER,
+    password=POSTGRES_PASSWORD,
+    port=POSTGRES_PORT)
+
+df = pd.read_sql_query("""select ST_Distance(r.starting_position, r.finishing_position) as dist from rides r 
+                       where ST_Distance(r.starting_position, r.finishing_position) < 20000 
+                       and ST_Distance(r.starting_position, r.finishing_position) > 150 
+                       and (r.starting_time::date = '2023-10-10'
+                       or r.starting_time::date = '2023-10-11')
+                       order by dist desc;"""
+                       ,con=conn)
+
+conn.close()
+df
+
+# %%
+
+plt.figure();
+df['dist'][:].plot.hist(bins=200, logy=False)
+
+plt.show()
+# %%
+
+df.boxplot()
+plt.show()
+# %%
