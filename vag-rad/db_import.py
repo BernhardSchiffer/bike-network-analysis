@@ -150,22 +150,6 @@ insert_list(insert_bike_types_sql, bike_types, single_commit=True)
 def file_key(filename):
     return filename.split('/')[-1][:-5]
 #%%
-# Import all bikes from scraped files into an temporary db-table
-# Files get imported in parallel by multiple threads
-directory = './scraping_data/'
-path = './scraping_data/tmp'
-
-file_names = get_files_in_daterange(directory, date_start='2024-03-01', date_end='2024-09-30')
-for f in file_names:
-    extract_archive_to_dir(f, path)
-
-filenames = []
-for root, dirs, files in os.walk(path):
-    for file in files:
-        filenames.append(os.path.join(root, file))
-
-filenames.sort(key=file_key)
-
 insert_bikes_tmp_sql = open("./sql/insert_bike_records.sql", "r").read()
 
 def import_bike_records_from_file(filename):
@@ -209,6 +193,23 @@ def import_bike_records_from_file(filename):
             ))
 
     insert_list(insert_bikes_tmp_sql, bike_records)
+#%%
+# Import all bikes from scraped files into an temporary db-table
+# Files get imported in parallel by multiple threads
+directory = './scraping_data/'
+path = './scraping_data/tmp'
+
+file_names = get_files_in_daterange(directory, date_start='2024-01-01', date_end='2024-01-31')
+for f in file_names:
+    extract_archive_to_dir(f, path)
+
+filenames = []
+for root, dirs, files in os.walk(path):
+    for file in files:
+        filenames.append(os.path.join(root, file))
+
+filenames.sort(key=file_key)
+
 print('insert bike records')
 with ThreadPool(processes=os.cpu_count()*2) as pool:
     pool.map(import_bike_records_from_file, filenames)
