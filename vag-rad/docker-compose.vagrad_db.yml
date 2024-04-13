@@ -5,6 +5,7 @@ services:
     image: postgis/postgis:16-master
     container_name: vag-bike-db
     shm_size: 2gb
+    command: -c 'max_connections=3000'
     volumes:
       - ./dump:/dumpfiles
       - vag_bike_db:/var/lib/postgresql/data:rw
