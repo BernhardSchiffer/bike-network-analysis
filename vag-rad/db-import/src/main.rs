@@ -170,7 +170,7 @@ pub async fn insert_bike_records(bikes: Vec<BikeTmpRecord>, connection_pool: Poo
         match sqlx::query(r#"insert into Bikes_Tmp (id, vehicle_type_id, time, position, station_id) values ($1, $2, $3, ST_GeomFromText($4), $5)"#)
             .bind(bike.id)
             .bind(bike.vehicle_type_id)
-            .bind(bike.time)
+            .bind(bike.time.with_timezone(&Utc))
             .bind(format!("POINT({} {})", bike.position.y, bike.position.x))
             .bind(bike.station_id)
             .execute(&connection_pool)
