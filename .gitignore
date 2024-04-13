@@ -2,3 +2,4 @@
 request_logs/
 .env
 .DS_Store
+.vscode

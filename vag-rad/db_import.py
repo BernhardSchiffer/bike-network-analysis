@@ -100,10 +100,16 @@ def import_stations_from_file(filename):
     except json.JSONDecodeError as e:
         print(f'Exception {e} while parsing {filename}')
         return
+    
+    try:
+        places = data['countries'][0]['cities'][0]['places']
+    except Exception as e:
+        print(f'Error {e} with {filename}. No places found')
+        return
     stations = []
     time = filename.split('/')[-1][:-5]
 
-    for place in data['countries'][0]['cities'][0]['places']:
+    for place in places:
         # stations
         if place['spot'] == True and place['bike'] == False:
             stations.append((
@@ -149,7 +155,7 @@ def file_key(filename):
 directory = './scraping_data/'
 path = './scraping_data/tmp'
 
-file_names = get_files_in_daterange(directory, date_start='2023-07-01', date_end='2023-09-30')
+file_names = get_files_in_daterange(directory, date_start='2024-03-01', date_end='2024-09-30')
 for f in file_names:
     extract_archive_to_dir(f, path)
 
@@ -173,7 +179,13 @@ def import_bike_records_from_file(filename):
     time = filename.split('/')[-1][:-5]
     bike_records = []
 
-    for place in data['countries'][0]['cities'][0]['places']:
+    try:
+        places = data['countries'][0]['cities'][0]['places']
+    except Exception as e:
+        print(f'Error {e} with {filename}. No places found')
+        return
+
+    for place in places:
         # bikes parked at stations
         if place['spot'] == True and place['bike'] == False:
             position = f"POINT({place['lng']} {place['lat']})"
