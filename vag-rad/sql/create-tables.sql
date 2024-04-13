@@ -1,7 +1,7 @@
 CREATE TABLE Bikes_Tmp (
     id text not null,
     vehicle_type_id int,
-    time timestamp not null,
+    time timestamp with time zone not null,
     position geography(POINT,4326) not null,
     station_id int,
     primary key (id, time)
@@ -20,7 +20,7 @@ CREATE TABLE Stations_Tmp (
     position geography(POINT,4326) not null,
     bike_racks int not null,
     special_racks int not null,
-    created_at timestamp not null,
+    created_at timestamp with time zone not null,
     primary key (station_id, created_at)
 );
 
@@ -35,7 +35,7 @@ CREATE TABLE Stations (
     position geography(POINT,4326) not null,
     bike_racks int not null,
     special_racks int not null,
-    first_seen timestamp not null,
+    first_seen timestamp with time zone not null,
     unique (station_id, name, short_name, position, bike_racks, special_racks)
 );
 
@@ -53,7 +53,7 @@ CREATE TABLE Bikes (
     id serial primary key,
     bike_id text not null,
     vehicle_type_id int,
-    first_seen timestamp not null,
+    first_seen timestamp with time zone not null,
     unique (bike_id, vehicle_type_id),
     foreign key (vehicle_type_id) 
         references bike_types (id)
@@ -66,8 +66,8 @@ ON Bikes(bike_id);
 CREATE TABLE Rides (
     id serial not null,
     bike_id int not null,
-    starting_time timestamp not null,
-    finishing_time timestamp not null,
+    starting_time timestamp with time zone not null,
+    finishing_time timestamp with time zone not null,
     starting_position geography(POINT,4326) not null,
     finishing_position geography(POINT,4326) not null,
     starting_station_id int,
