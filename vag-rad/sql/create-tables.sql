@@ -14,12 +14,12 @@ CREATE INDEX idx_bikes_tmp_time
 ON Bikes_Tmp(time ASC);
 
 CREATE TABLE Stations_Tmp (
-    station_id int not null,
+    station_id int8 not null,
     name text,
     short_name text,
     position geography(POINT,4326) not null,
-    bike_racks int not null,
-    special_racks int not null,
+    bike_racks int8 not null,
+    special_racks int8 not null,
     created_at timestamp with time zone not null,
     primary key (station_id, created_at)
 );
