@@ -1,16 +1,30 @@
-use std::{fs::{self, DirEntry, File, ReadDir}, io::BufReader, path::{Path, PathBuf}, str::FromStr, sync::Arc, thread, time::Duration};
+use std::{
+    fs::{self, DirEntry, File, ReadDir},
+    io::BufReader,
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::Arc,
+    thread,
+    time::Duration,
+};
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use crossbeam::channel::unbounded;
 use dotenv::dotenv;
+use flate2::read::GzDecoder;
 use futures::{self, FutureExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use models::{bike_tmp_record::BikeTmpRecord, station_tmp_record::{SelectStationTmpRecord, StationTmpRecord}};
-use tokio::{join, sync::Semaphore};
-use threadpool::ThreadPool;
-use sqlx::{postgres::{PgConnectOptions, PgPoolOptions}, Pool, Postgres};
-use flate2::read::GzDecoder;
+use models::{
+    bike_tmp_record::BikeTmpRecord,
+    station_tmp_record::{SelectStationTmpRecord, StationTmpRecord},
+};
+use sqlx::{
+    postgres::{PgConnectOptions, PgPoolOptions},
+    Pool, Postgres,
+};
 use tar::Archive;
+use threadpool::ThreadPool;
+use tokio::{join, sync::Semaphore};
 
 use crate::models::scraping_file::VagScrapingFile;
 mod models;
@@ -24,7 +38,7 @@ async fn main() {
         let core_count = thread::available_parallelism().unwrap().get();
         println!("running process on {} cores", core_count);
         let data_dir = "./scraping_data";
-        
+
         let paths = fs::read_dir(data_dir).unwrap();
         let start_date = NaiveDate::from_ymd_opt(2024, 1, 1);
         let end_date = NaiveDate::from_ymd_opt(2024, 3, 31);
@@ -50,8 +64,7 @@ async fn main() {
         for path in archives_to_unpack {
             let extract_files_pb = extract_files_pb.clone();
             pool.execute(move || {
-                // println!("{}", path.path().as_path().to_str().unwrap());
-                //decompress_files(path.path(), Path::new(working_dir).to_path_buf()).unwrap();
+                decompress_files(path.path(), Path::new(working_dir).to_path_buf()).unwrap();
                 extract_files_pb.inc(1);
             })
         }
@@ -59,7 +72,7 @@ async fn main() {
         extract_files_pb.finish_with_message("✅ successfully extracted files");
 
         let num_of_files = fs::read_dir(working_dir).unwrap().count();
-        
+
         let file_read_pb = progress_bars.add(ProgressBar::new(num_of_files as u64));
         file_read_pb.set_style(sty.clone());
         file_read_pb.set_message("read files");
@@ -76,7 +89,7 @@ async fn main() {
         let (bikes_producer, bikes_receiver) = unbounded();
         let (stations_producer, stations_receiver) = unbounded();
         let paths = fs::read_dir(working_dir).unwrap();
-    
+
         let producer_thread = thread::spawn(move || {
             let producer_thread_pool = ThreadPool::new(core_count);
             for path in paths {
@@ -121,7 +134,7 @@ async fn main() {
                         Err(_e) => {
                             // println!("{}", e);
                             bike_import_pb.inc(1);
-                        },
+                        }
                     };
                 }));
             }
@@ -135,7 +148,7 @@ async fn main() {
         let station_receiver_thread = tokio::spawn(async move {
             let sem = Arc::new(Semaphore::new(10));
             let mut threads = Vec::new();
-            
+
             for stations in stations_receiver {
                 if stations.len() <= 0 {
                     continue;
@@ -150,7 +163,7 @@ async fn main() {
                         Err(_e) => {
                             // println!("{}", e);
                             station_import_pb.inc(1);
-                        },
+                        }
                     };
                 }));
             }
@@ -158,7 +171,7 @@ async fn main() {
             db_pool.close().await;
             station_import_pb.finish_with_message("✅ finished station records db import");
         });
-        
+
         producer_thread.join().unwrap();
         join!(bike_receiver_thread);
         join!(station_receiver_thread);
@@ -170,7 +183,6 @@ async fn main() {
         println!("insert unique bikes");
 
         println!("calculate routes per bike");
-
     }
 
     let elapsed = now.elapsed();
@@ -201,11 +213,15 @@ fn is_ds_store_file(path: &Path) -> bool {
     return filename == ".DS_Store";
 }
 
-fn get_files_in_date_range(path: ReadDir, start_date: Option<NaiveDate>, end_date: Option<NaiveDate>) -> Vec<DirEntry> {
+fn get_files_in_date_range(
+    path: ReadDir,
+    start_date: Option<NaiveDate>,
+    end_date: Option<NaiveDate>,
+) -> Vec<DirEntry> {
     let mut valid_files: Vec<DirEntry> = Vec::new();
     let start_date = match start_date {
         Some(d) => d,
-        None => NaiveDate::MIN
+        None => NaiveDate::MIN,
     };
     let end_date = match end_date {
         Some(d) => d,
@@ -256,24 +272,24 @@ fn get_bikes(scraping_file: &VagScrapingFile, time: DateTime<Utc>) -> Vec<BikeTm
             for place in &city.places {
                 if place.spot && !place.bike {
                     for bike in &place.bike_list {
-                        let station_id: Option<i64> = Option::Some(place.uid); 
-                        let bike_tmp_record = BikeTmpRecord{
+                        let station_id: Option<i64> = Option::Some(place.uid);
+                        let bike_tmp_record = BikeTmpRecord {
                             id: bike.number.clone(),
                             vehicle_type_id: bike.bike_type,
                             time: time,
-                            position: geo_types::point!{x: place.lat, y: place.lng},
+                            position: geo_types::point! {x: place.lat, y: place.lng},
                             station_id: station_id,
                         };
                         bikes.push(bike_tmp_record)
                     }
                 } else if !place.spot && place.bike {
                     for bike in &place.bike_list {
-                        let station_id: Option<i64> = Option::None; 
-                        let bike_tmp_record = BikeTmpRecord{
+                        let station_id: Option<i64> = Option::None;
+                        let bike_tmp_record = BikeTmpRecord {
                             id: bike.number.clone(),
                             vehicle_type_id: bike.bike_type,
                             time: time,
-                            position: geo_types::point!{x: place.lat, y: place.lng},
+                            position: geo_types::point! {x: place.lat, y: place.lng},
                             station_id: station_id,
                         };
                         bikes.push(bike_tmp_record)
@@ -291,11 +307,11 @@ fn get_stations(scraping_file: &VagScrapingFile, time: DateTime<Utc>) -> Vec<Sta
         for city in &country.cities {
             for place in &city.places {
                 if place.spot && !place.bike {
-                    let station_tmp_record = StationTmpRecord{
+                    let station_tmp_record = StationTmpRecord {
                         station_id: place.uid,
                         name: place.name.clone(),
                         short_name: place.number.to_string(),
-                        position: geo_types::point!{x: place.lat, y: place.lng},
+                        position: geo_types::point! {x: place.lat, y: place.lng},
                         bike_racks: place.bike_racks,
                         special_racks: place.special_racks,
                         time: time,
@@ -310,12 +326,16 @@ fn get_stations(scraping_file: &VagScrapingFile, time: DateTime<Utc>) -> Vec<Sta
 
 pub async fn connect() -> Result<Pool<Postgres>, sqlx::Error> {
     dotenv().ok();
-    let postgres_user: String = std::env::var("TEST_POSTGRES_USER").expect("POSTGRES_USER must be set.");
-    let postgres_password: String = std::env::var("TEST_POSTGRES_PASSWORD").expect("POSTGRES_PASSWORD must be set.");
+    let postgres_user: String =
+        std::env::var("TEST_POSTGRES_USER").expect("POSTGRES_USER must be set.");
+    let postgres_password: String =
+        std::env::var("TEST_POSTGRES_PASSWORD").expect("POSTGRES_PASSWORD must be set.");
     let postgres_db: String = std::env::var("TEST_POSTGRES_DB").expect("POSTGRES_DB must be set.");
-    let postgres_host: String = std::env::var("TEST_POSTGRES_HOST").expect("POSTGRES_HOST must be set.");
-    let postgres_port: String = std::env::var("TEST_POSTGRES_PORT").expect("POSTGRES_PORT must be set.");
-    
+    let postgres_host: String =
+        std::env::var("TEST_POSTGRES_HOST").expect("POSTGRES_HOST must be set.");
+    let postgres_port: String =
+        std::env::var("TEST_POSTGRES_PORT").expect("POSTGRES_PORT must be set.");
+
     let connection_options = PgConnectOptions::new()
         .host(&postgres_host)
         .port(postgres_port.parse::<u16>().unwrap())
@@ -326,11 +346,15 @@ pub async fn connect() -> Result<Pool<Postgres>, sqlx::Error> {
         .test_before_acquire(true)
         .max_connections(3000)
         .acquire_timeout(Duration::from_secs(120))
-        .connect_with(connection_options).await;
+        .connect_with(connection_options)
+        .await;
     return pool;
 }
 
-pub async fn insert_bike_records(bikes: Vec<BikeTmpRecord>, connection_pool: &Pool<Postgres>) -> Result<(), sqlx::Error> {
+pub async fn insert_bike_records(
+    bikes: Vec<BikeTmpRecord>,
+    connection_pool: &Pool<Postgres>,
+) -> Result<(), sqlx::Error> {
     // match bikes.get(0) {
     //     Some(bike) => println!("import bikes for {}", bike.time.to_rfc3339()),
     //     None => println!("ERROR on {:?}", bikes),
@@ -340,34 +364,42 @@ pub async fn insert_bike_records(bikes: Vec<BikeTmpRecord>, connection_pool: &Po
     let mut dates = Vec::new();
     let mut positions = Vec::new();
     let mut stations = Vec::new();
-    
+
     for bike in bikes {
         bike_ids.push(bike.id);
         vehicle_types_ids.push(bike.vehicle_type_id);
         dates.push(bike.time.with_timezone(&Utc));
-        positions.push(format!("POINT({} {})", bike.position.0.y, bike.position.0.x));
+        positions.push(format!(
+            "POINT({} {})",
+            bike.position.0.y, bike.position.0.x
+        ));
         stations.push(bike.station_id);
-    };
+    }
 
-    match sqlx::query("
+    match sqlx::query(
+        "
         insert into Bikes_Tmp (id, vehicle_type_id, time, position, station_id) 
         SELECT UNNEST($1), unnest($2), unnest($3), ST_GeomFromText(unnest($4)), unnest($5)
-    ")
-        .bind(bike_ids)
-        .bind(vehicle_types_ids)
-        .bind(dates)
-        .bind(positions)
-        .bind(stations)
-        .execute(connection_pool)
-        .await {
-            Ok(_) => (),
-            Err(e) => return Err(e),
-        };
+    ",
+    )
+    .bind(bike_ids)
+    .bind(vehicle_types_ids)
+    .bind(dates)
+    .bind(positions)
+    .bind(stations)
+    .execute(connection_pool)
+    .await
+    {
+        Ok(_) => (),
+        Err(e) => return Err(e),
+    };
     return Ok(());
 }
 
-
-pub async fn insert_station_records(stations: Vec<StationTmpRecord>, connection_pool: &Pool<Postgres>) -> Result<(), sqlx::Error> {
+pub async fn insert_station_records(
+    stations: Vec<StationTmpRecord>,
+    connection_pool: &Pool<Postgres>,
+) -> Result<(), sqlx::Error> {
     // match stations.get(0) {
     //     Some(station) => println!("import stations for {}", station.time.to_rfc3339()),
     //     None => println!("ERROR on {:?}", stations),
@@ -379,16 +411,19 @@ pub async fn insert_station_records(stations: Vec<StationTmpRecord>, connection_
     let mut bike_racks = Vec::new();
     let mut special_racks = Vec::new();
     let mut dates = Vec::new();
-    
+
     for station in stations {
         station_ids.push(station.station_id);
         names.push(station.name);
         short_names.push(station.short_name);
-        positions.push(format!("POINT({} {})", station.position.0.y, station.position.0.x));
+        positions.push(format!(
+            "POINT({} {})",
+            station.position.0.y, station.position.0.x
+        ));
         bike_racks.push(station.bike_racks);
         special_racks.push(station.special_racks);
         dates.push(station.time.with_timezone(&Utc));
-    };
+    }
 
     match sqlx::query("
         insert into Stations_Tmp (station_id, name, short_name, position, bike_racks, special_racks, created_at)
@@ -409,7 +444,10 @@ pub async fn insert_station_records(stations: Vec<StationTmpRecord>, connection_
     return Ok(());
 }
 
-pub async fn insert_stations(stations: Vec<StationTmpRecord>, connection_pool: &Pool<Postgres>) -> Result<(), sqlx::Error> {
+pub async fn insert_stations(
+    stations: Vec<StationTmpRecord>,
+    connection_pool: &Pool<Postgres>,
+) -> Result<(), sqlx::Error> {
     // match stations.get(0) {
     //     Some(station) => println!("import stations for {}", station.time.to_rfc3339()),
     //     None => println!("ERROR on {:?}", stations),
@@ -421,16 +459,19 @@ pub async fn insert_stations(stations: Vec<StationTmpRecord>, connection_pool: &
     let mut bike_racks = Vec::new();
     let mut special_racks = Vec::new();
     let mut dates = Vec::new();
-    
+
     for station in stations {
         station_ids.push(station.station_id);
         names.push(station.name);
         short_names.push(station.short_name);
-        positions.push(format!("POINT({} {})", station.position.0.y, station.position.0.x));
+        positions.push(format!(
+            "POINT({} {})",
+            station.position.0.y, station.position.0.x
+        ));
         bike_racks.push(station.bike_racks);
         special_racks.push(station.special_racks);
         dates.push(station.time.with_timezone(&Utc));
-    };
+    }
 
     match sqlx::query("
         insert into Stations (station_id, name, short_name, position, bike_racks, special_racks, first_seen)
@@ -452,7 +493,6 @@ pub async fn insert_stations(stations: Vec<StationTmpRecord>, connection_pool: &
 }
 
 async fn insert_unique_stations(connection_pool: &Pool<Postgres>) -> Result<(), sqlx::Error> {
-
     let result = sqlx::query_as::<_, SelectStationTmpRecord>(r#"select distinct on (st.station_id, st."name", st.short_name, st."position", st.bike_racks, st.special_racks) st.station_id, st."name", st.short_name, ST_AsText(st."position") as position, st.bike_racks, st.special_racks, st.created_at as time 
     from stations_tmp st
     order by st.station_id, st."name", st.short_name, st."position", st.bike_racks, st.special_racks, st.created_at asc;"#)
@@ -470,8 +510,7 @@ async fn insert_unique_stations(connection_pool: &Pool<Postgres>) -> Result<(), 
         "[{elapsed_precise}] {bar:60.white/blue} {pos:>7}/{len:7} {msg}",
     )
     .unwrap();
-    let pb = ProgressBar::new(result.len() as u64)
-        .with_message("insert unique stations");
+    let pb = ProgressBar::new(result.len() as u64).with_message("insert unique stations");
     pb.set_style(style);
 
     let station_ids: Vec<i64> = result.iter().map(|s| s.station_id).collect();
@@ -489,26 +528,27 @@ async fn insert_unique_stations(connection_pool: &Pool<Postgres>) -> Result<(), 
 
     let transaction = connection_pool.begin().await.unwrap();
 
-    match sqlx::query(r#"
+    match sqlx::query(
+        r#"
             delete from stations_tmp
             where station_id = any($1)
-    "#)
-        .bind(&station_ids[..])
-        .execute(connection_pool)
-        .await {
-            Ok(_) => {
-                println!("delete successfull");
-                transaction.commit().await.unwrap();
-            },
-            Err(e) => {
-                println!("{}", e);
-                transaction.rollback().await.unwrap();
-            },
-        };
+    "#,
+    )
+    .bind(&station_ids[..])
+    .execute(connection_pool)
+    .await
+    {
+        Ok(_) => {
+            println!("delete successfull");
+            transaction.commit().await.unwrap();
+        }
+        Err(e) => {
+            println!("{}", e);
+            transaction.rollback().await.unwrap();
+        }
+    };
 
     return Ok(());
 }
 
-async fn insert_unique_bikes(connection_pool: &Pool<Postgres>) {
-
-}
+async fn insert_unique_bikes(connection_pool: &Pool<Postgres>) {}
