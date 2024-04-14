@@ -1,6 +1,6 @@
-use std::{fs::{self, File}, io::BufReader, path::{Path, PathBuf}, sync::Arc, thread, time::Duration};
+use std::{fs::{self, DirEntry, File, ReadDir}, io::BufReader, path::{Path, PathBuf}, str::FromStr, sync::Arc, thread, time::Duration};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use crossbeam::channel::unbounded;
 use dotenv::dotenv;
 use futures;
@@ -25,6 +25,12 @@ async fn main() {
         println!("running process on {} cores", core_count);
         
         let paths = fs::read_dir("./scraping_data").unwrap();
+        let start_date = NaiveDate::from_ymd_opt(2024, 1, 1);
+        let end_date = NaiveDate::from_ymd_opt(2024, 3, 31);
+        // let start_date = Some(convert_Naive_to_DateTime(start_date));
+        // let end_date = Some(convert_Naive_to_DateTime(end_date));
+
+        let archives_to_unpack = get_files_in_date_range(paths, start_date, end_date);
         let working_dir = "./scraping_data/tmp";
 
         // setup progressbars
@@ -34,15 +40,16 @@ async fn main() {
         )
         .unwrap();
 
-        let num_of_archives = fs::read_dir("./scraping_data").unwrap().count();
+        let num_of_archives = archives_to_unpack.len();
         let extract_files_pb = progress_bars.add(ProgressBar::new(num_of_archives as u64));
         extract_files_pb.set_style(sty.clone());
         extract_files_pb.set_message("extract files");
 
         let pool = ThreadPool::new(core_count);
-        for _path in paths {
+        for path in archives_to_unpack {
             let extract_files_pb = extract_files_pb.clone();
             pool.execute(move || {
+                // println!("{}", path.path().as_path().to_str().unwrap());
                 // decompress_files(path.unwrap().path(), Path::new(working_dir).to_path_buf());
                 extract_files_pb.inc(1);
             })
@@ -164,11 +171,48 @@ fn get_timestamp_from_filename(path: &Path) -> DateTime<Utc> {
     return time;
 }
 
-fn 
+fn get_timestamp_from_archive(path: &Path) -> NaiveDate {
+    let filename = path.file_name().unwrap().to_str().unwrap();
+    let filename = filename.split_terminator(".").next().unwrap();
+    let time = match NaiveDate::from_str(&filename) {
+        Ok(time) => time,
+        Err(e) => panic!("error occured while parsing {}. ({})", filename, e),
+    };
+    return time;
+}
+
+fn get_files_in_date_range(path: ReadDir, start_date: Option<NaiveDate>, end_date: Option<NaiveDate>) -> Vec<DirEntry> {
+    let mut valid_files: Vec<DirEntry> = Vec::new();
+    let start_date = match start_date {
+        Some(d) => d,
+        None => NaiveDate::MIN
+    };
+    let end_date = match end_date {
+        Some(d) => d,
+        None => NaiveDate::MAX,
+    };
+
+    for file in path {
+        let file = file.unwrap();
+        let file_metadata = std::fs::metadata(file.path()).unwrap();
+        if file_metadata.is_file() {
+            let file_date = get_timestamp_from_archive(file.path().as_path());
+            if file_date.ge(&start_date) && file_date.le(&end_date) {
+                valid_files.push(file);
+            }
+        }
+    }
+
+    return valid_files;
+}
 
 fn _decompress_files(archive: PathBuf, target_dir: PathBuf) {
     //println!("decompress {:?}", archive);
     zip_extract(&archive, &target_dir).unwrap();
+}
+
+fn convert_Naive_to_DateTime(naive_date: NaiveDate) -> NaiveDateTime {
+    return naive_date.and_hms_opt(0, 0, 0).unwrap();
 }
 
 fn read_scraping_file(path: &Path) -> VagScrapingFile {
