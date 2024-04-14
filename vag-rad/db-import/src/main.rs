@@ -3,6 +3,7 @@ use std::{fs::{self, File}, io::BufReader, path::{Path, PathBuf}, sync::Arc, thr
 use chrono::{DateTime, Utc};
 use crossbeam::channel::unbounded;
 use dotenv::dotenv;
+use futures;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use models::{bike_tmp_record::BikeTmpRecord, station_tmp_record::StationTmpRecord};
 use postgis::twkb::Point;
@@ -93,44 +94,60 @@ async fn main() {
 
         let db_pool = connect().await.unwrap();
 
-        // let db_pool = db_pool.clone();
+        let db_pool = db_pool.clone();
         let bike_receiver_thread = tokio::spawn(async move {
-            // let bike_receiver_thread_pool = ThreadPool::new(core_count);
             let sem = Arc::new(Semaphore::new(10));
+            let mut threads = Vec::new();
+
             for bikes in bikes_receiver {
                 let bike_import_pb = bike_import_pb.clone();
                 let db_pool = db_pool.clone();
                 let permit = Arc::clone(&sem).acquire_owned().await;
-                // bike_receiver_thread_pool.execute(move || {
-                tokio::spawn(async move {
+                threads.push(tokio::spawn(async move {
                     let _permit = permit;
-                    insert_bike_records(bikes, &db_pool).await;
-                    bike_import_pb.inc(1);
-                });
+                    match insert_bike_records(bikes, &db_pool).await {
+                        Ok(_) => bike_import_pb.inc(1),
+                        Err(_e) => {
+                            // println!("{}", e);
+                            bike_import_pb.inc(1);
+                        },
+                    };
+                }));
             }
-            // bike_receiver_thread_pool.join();
+            futures::future::join_all(threads).await;
             db_pool.close().await;
             bike_import_pb.finish_with_message("✅ finished bike records db import");
         });
 
-        let station_receiver_thread = thread::spawn(move || {
-            let station_receiver_thread_pool = ThreadPool::new(core_count);
+        let db_pool = connect().await.unwrap();
+        let station_receiver_thread = tokio::spawn(async move {
+            let sem = Arc::new(Semaphore::new(10));
+            let mut threads = Vec::new();
             
-            for _stations in stations_receiver {
+            for stations in stations_receiver {
                 let station_import_pb = station_import_pb.clone();
-                station_receiver_thread_pool.execute(move || {
-                    // println!("import {} station records", stations.len());
-                    station_import_pb.inc(1);
-                });
+                let db_pool = db_pool.clone();
+                let permit = Arc::clone(&sem).acquire_owned().await;
+                threads.push(tokio::spawn(async move {
+                    let _permit = permit;
+                    match insert_station_records(stations, &db_pool).await {
+                        Ok(_) => station_import_pb.inc(1),
+                        Err(_e) => {
+                            // println!("{}", e);
+                            station_import_pb.inc(1);
+                        },
+                    };
+                }));
             }
-            station_receiver_thread_pool.join();
+            futures::future::join_all(threads).await;
+            db_pool.close().await;
             station_import_pb.finish_with_message("✅ finished station records db import");
         });
         
         producer_thread.join().unwrap();
         // bike_receiver_thread.join().unwrap();
         join!(bike_receiver_thread);
-        station_receiver_thread.join().unwrap();
+        join!(station_receiver_thread);
         // db_pool.close().await;
     }
 
@@ -146,6 +163,8 @@ fn get_timestamp_from_filename(path: &Path) -> DateTime<Utc> {
     };
     return time;
 }
+
+fn 
 
 fn _decompress_files(archive: PathBuf, target_dir: PathBuf) {
     //println!("decompress {:?}", archive);
@@ -232,35 +251,89 @@ pub async fn connect() -> Result<Pool<Postgres>, sqlx::Error> {
         .username(&postgres_user)
         .password(&postgres_password)
         .database(&postgres_db);
-    let pool = PgPoolOptions::new().test_before_acquire(true).max_connections(3000).acquire_timeout(Duration::from_secs(120)).connect_with(connection_options).await;
+    let pool = PgPoolOptions::new()
+        .test_before_acquire(true)
+        .max_connections(3000)
+        .acquire_timeout(Duration::from_secs(120))
+        .connect_with(connection_options).await;
     return pool;
 }
 
-pub async fn insert_bike_records(bikes: Vec<BikeTmpRecord>, connection_pool: &Pool<Postgres>) {
+pub async fn insert_bike_records(bikes: Vec<BikeTmpRecord>, connection_pool: &Pool<Postgres>) -> Result<(), sqlx::Error> {
     // match bikes.get(0) {
     //     Some(bike) => println!("import bikes for {}", bike.time.to_rfc3339()),
     //     None => println!("ERROR on {:?}", bikes),
     // };
+    let mut bike_ids = Vec::new();
+    let mut vehicle_types_ids = Vec::new();
+    let mut dates = Vec::new();
+    let mut positions = Vec::new();
+    let mut stations = Vec::new();
     
-    // let transaction = connection_pool.begin().await.unwrap();
-    let sem = Arc::new(Semaphore::new(300));
     for bike in bikes {
-        let permit = Arc::clone(&sem).acquire_owned().await;
-        let connection_pool = connection_pool.clone();
-        tokio::spawn(async move {
-            let _permit = permit;
-            match sqlx::query(r#"insert into Bikes_Tmp (id, vehicle_type_id, time, position, station_id) values ($1, $2, $3, ST_GeomFromText($4), $5)"#)
-                .bind(bike.id)
-                .bind(bike.vehicle_type_id)
-                .bind(bike.time.with_timezone(&Utc))
-                .bind(format!("POINT({} {})", bike.position.y, bike.position.x))
-                .bind(bike.station_id)
-                .execute(&connection_pool)
-                .await {
-                    Ok(_) => (),
-                    Err(_e) => (),
-                }
-        });
-    }
-    // transaction.commit().await.unwrap();
+        bike_ids.push(bike.id);
+        vehicle_types_ids.push(bike.vehicle_type_id);
+        dates.push(bike.time.with_timezone(&Utc));
+        positions.push(format!("POINT({} {})", bike.position.y, bike.position.x));
+        stations.push(bike.station_id);
+    };
+
+    match sqlx::query("
+        insert into Bikes_Tmp (id, vehicle_type_id, time, position, station_id) 
+        SELECT UNNEST($1), unnest($2), unnest($3), ST_GeomFromText(unnest($4)), unnest($5)
+    ")
+        .bind(bike_ids)
+        .bind(vehicle_types_ids)
+        .bind(dates)
+        .bind(positions)
+        .bind(stations)
+        .execute(connection_pool)
+        .await {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        };
+    return Ok(());
+}
+
+
+pub async fn insert_station_records(stations: Vec<StationTmpRecord>, connection_pool: &Pool<Postgres>) -> Result<(), sqlx::Error> {
+    // match stations.get(0) {
+    //     Some(station) => println!("import stations for {}", station.time.to_rfc3339()),
+    //     None => println!("ERROR on {:?}", stations),
+    // };
+    let mut station_ids = Vec::new();
+    let mut names = Vec::new();
+    let mut short_names = Vec::new();
+    let mut positions = Vec::new();
+    let mut bike_racks = Vec::new();
+    let mut special_racks = Vec::new();
+    let mut dates = Vec::new();
+    
+    for station in stations {
+        station_ids.push(station.station_id);
+        names.push(station.name);
+        short_names.push(station.short_name);
+        positions.push(format!("POINT({} {})", station.position.y, station.position.x));
+        bike_racks.push(station.bike_racks);
+        special_racks.push(station.special_racks);
+        dates.push(station.time.with_timezone(&Utc));
+    };
+
+    match sqlx::query("
+        insert into Stations_Tmp (station_id, name, short_name, position, bike_racks, special_racks, created_at)
+        select unnest($1), unnest($2), unnest($3), ST_GeomFromText(unnest($4)), unnest($5), unnest($6), unnest($7)
+    ")
+        .bind(station_ids)
+        .bind(names)
+        .bind(short_names)
+        .bind(positions)
+        .bind(bike_racks)
+        .bind(special_racks)
+        .bind(dates)
+        .execute(connection_pool)
+        .await {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        };
+    return Ok(());
 }
