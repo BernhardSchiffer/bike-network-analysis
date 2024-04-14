@@ -8,9 +8,10 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use models::{bike_tmp_record::BikeTmpRecord, station_tmp_record::StationTmpRecord};
 use postgis::twkb::Point;
 use tokio::{join, sync::Semaphore};
-use zip_extensions::zip_extract;
 use threadpool::ThreadPool;
 use sqlx::{postgres::{PgConnectOptions, PgPoolOptions}, Pool, Postgres};
+use flate2::read::GzDecoder;
+use tar::Archive;
 
 use crate::models::scraping_file::VagScrapingFile;
 mod models;
@@ -23,15 +24,16 @@ async fn main() {
     {
         let core_count = thread::available_parallelism().unwrap().get();
         println!("running process on {} cores", core_count);
+        let data_dir = "./scraping_data";
         
-        let paths = fs::read_dir("./scraping_data").unwrap();
+        let paths = fs::read_dir(data_dir).unwrap();
         let start_date = NaiveDate::from_ymd_opt(2024, 1, 1);
         let end_date = NaiveDate::from_ymd_opt(2024, 3, 31);
         // let start_date = Some(convert_Naive_to_DateTime(start_date));
         // let end_date = Some(convert_Naive_to_DateTime(end_date));
 
         let archives_to_unpack = get_files_in_date_range(paths, start_date, end_date);
-        let working_dir = "./scraping_data/tmp";
+        let working_dir = "./scraping_data/tmp1";
 
         // setup progressbars
         let progress_bars = MultiProgress::new();
@@ -49,13 +51,14 @@ async fn main() {
         for path in archives_to_unpack {
             let extract_files_pb = extract_files_pb.clone();
             pool.execute(move || {
-                // println!("{}", path.path().as_path().to_str().unwrap());
-                // decompress_files(path.unwrap().path(), Path::new(working_dir).to_path_buf());
+                println!("{}", path.path().as_path().to_str().unwrap());
+                decompress_files(path.path(), Path::new(working_dir).to_path_buf()).unwrap();
                 extract_files_pb.inc(1);
             })
         }
         pool.join();
         extract_files_pb.finish_with_message("✅ successfully extracted files");
+        return;
 
         let num_of_files = fs::read_dir(working_dir).unwrap().count();
         
@@ -206,9 +209,15 @@ fn get_files_in_date_range(path: ReadDir, start_date: Option<NaiveDate>, end_dat
     return valid_files;
 }
 
-fn _decompress_files(archive: PathBuf, target_dir: PathBuf) {
-    //println!("decompress {:?}", archive);
-    zip_extract(&archive, &target_dir).unwrap();
+fn decompress_files(archive: PathBuf, target_dir: PathBuf) -> Result<(), std::io::Error> {
+    println!("decompress {:?}", archive);
+
+    let tar_gz = File::open(archive)?;
+    let tar = GzDecoder::new(tar_gz);
+    let mut archive = Archive::new(tar);
+    archive.unpack(target_dir)?;
+
+    Ok(())
 }
 
 fn convert_Naive_to_DateTime(naive_date: NaiveDate) -> NaiveDateTime {
