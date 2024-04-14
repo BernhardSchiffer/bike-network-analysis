@@ -40,8 +40,8 @@ async fn main() {
         let data_dir = "./scraping_data";
 
         let paths = fs::read_dir(data_dir).unwrap();
-        let start_date = NaiveDate::from_ymd_opt(2024, 1, 1);
-        let end_date = NaiveDate::from_ymd_opt(2024, 3, 31);
+        let start_date = NaiveDate::from_ymd_opt(2024, 3, 21);
+        let end_date = NaiveDate::from_ymd_opt(2024, 3, 21);
         // let start_date = Some(convert_Naive_to_DateTime(start_date));
         // let end_date = Some(convert_Naive_to_DateTime(end_date));
 
@@ -58,6 +58,7 @@ async fn main() {
         let num_of_archives = archives_to_unpack.len();
         let extract_files_pb = progress_bars.add(ProgressBar::new(num_of_archives as u64));
         extract_files_pb.set_style(sty.clone());
+        extract_files_pb.enable_steady_tick(Duration::from_millis(100));
         extract_files_pb.set_message("extract files");
 
         let pool = ThreadPool::new(core_count);
@@ -75,14 +76,17 @@ async fn main() {
 
         let file_read_pb = progress_bars.add(ProgressBar::new(num_of_files as u64));
         file_read_pb.set_style(sty.clone());
+        file_read_pb.enable_steady_tick(Duration::from_millis(100));
         file_read_pb.set_message("read files");
 
         let bike_import_pb = progress_bars.add(ProgressBar::new(num_of_files as u64));
         bike_import_pb.set_style(sty.clone());
+        bike_import_pb.enable_steady_tick(Duration::from_millis(100));
         bike_import_pb.set_message("import temporary bike records");
 
         let station_import_pb = progress_bars.add(ProgressBar::new(num_of_files as u64));
         station_import_pb.set_style(sty.clone());
+        station_import_pb.enable_steady_tick(Duration::from_millis(100));
         station_import_pb.set_message("import temporary station records");
 
         // setup producer and receivers
@@ -91,7 +95,7 @@ async fn main() {
         let paths = fs::read_dir(working_dir).unwrap();
 
         let producer_thread = thread::spawn(move || {
-            let producer_thread_pool = ThreadPool::new(core_count);
+            let producer_thread_pool = ThreadPool::new(20);
             for path in paths {
                 let bp = bikes_producer.clone();
                 let sp = stations_producer.clone();
@@ -117,7 +121,7 @@ async fn main() {
 
         // let db_pool1 = db_pool.clone();
         let bike_receiver_thread = tokio::spawn(async move {
-            let sem = Arc::new(Semaphore::new(10));
+            let sem = Arc::new(Semaphore::new(500));
             let mut threads = Vec::new();
 
             for bikes in bikes_receiver {
@@ -146,7 +150,7 @@ async fn main() {
         let db_pool = connect().await.unwrap();
         // let db_pool2 = db_pool.clone();
         let station_receiver_thread = tokio::spawn(async move {
-            let sem = Arc::new(Semaphore::new(10));
+            let sem = Arc::new(Semaphore::new(100));
             let mut threads = Vec::new();
 
             for stations in stations_receiver {
@@ -244,7 +248,7 @@ fn get_files_in_date_range(
 }
 
 fn decompress_files(archive: PathBuf, target_dir: PathBuf) -> Result<(), std::io::Error> {
-    println!("decompress {:?}", archive);
+    // println!("decompress {:?}", archive);
 
     let tar_gz = File::open(archive)?;
     let tar = GzDecoder::new(tar_gz);
