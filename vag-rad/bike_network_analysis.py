@@ -53,7 +53,7 @@ class PolygonFilter:
         return is_not_in_place
 
 # %% 
-# analysis of osm features in Nürnberg
+# evaluation of osm features in Nürnberg
 print("Total number of objects in Mittelfranken:", sum(1 for o in osmium.FileProcessor('mittelfranken-latest.osm.pbf')))
 
 print("Of which are ways with tags:", sum(1 for o in osmium.FileProcessor('mittelfranken-latest.osm.pbf').with_filter(osmium.filter.EmptyTagFilter()).with_filter(osmium.filter.EntityFilter(osmium.osm.WAY))))
@@ -86,7 +86,15 @@ for k, v in stats.items():
         tmp[k] = v
 
 bicycle_stats = Counter(tmp)
-bicycle_stats.most_common(len(bicycle_stats))
+display(bicycle_stats.most_common(len(bicycle_stats)))
+
+sorted(bicycle_stats.most_common(len(bicycle_stats)))
+# %%
+#f = open('./bicycle_attributes.txt', 'w')
+#for entry in sorted(bicycle_stats.most_common(len(bicycle_stats))):
+#    ((k, v), c) = entry
+#    f.write(f'{k}, {v}\n')
+#f.close()
 
 # %% 
 # fetch graph of bicycle infrastructure
@@ -100,9 +108,12 @@ bike_lane_filter = [
     '["cycleway"="opposite"]'
 ]
 bike_path_filter = [
-    '["highway"="path"]["bicycle"="designated"]',
+    '["bicycle"="designated"]',
     '["highway"="cycleway"]',
-    '["cycleway"="track"]'
+    '["cycleway"="track"]',
+    '["cycleway:right"="track"]',
+    '["cycleway:left"="track"]',
+    '["cycleway:both"="track"]'
 ]
 bike_road_filter = [
     '["bicycle_road"="yes"]'
