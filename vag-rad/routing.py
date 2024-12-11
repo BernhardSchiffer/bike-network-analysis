@@ -11,6 +11,7 @@ import folium
 import geopandas as gpd
 from collections import Counter
 import time
+import pickle
 
 #%%
 # Setup environment
@@ -130,9 +131,20 @@ print(f'finished calculating nearest nodes in {end - start} seconds')
 
 print('start calculating routes')
 start = time.time()
-routes = ox.routing.shortest_path(graph, starting_node_ids, finishing_node_ids, cpus=8)
+routes = ox.routing.shortest_path(graph, starting_node_ids, finishing_node_ids, cpus=16)
 end = time.time()
 print(f'finished calculating routes in {end - start} seconds')
+
+# %%
+# write calculated routes on file
+file = open('calculated_routes.txt', 'wb')
+pickle.dump(routes, file)
+file.close()
+
+# %%
+# load calculated routes from file
+with open('calculated_routes.txt', 'rb') as f:
+    routes = pickle.load(f)
 # %%
 # plot routes on a map
 map = folium.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
