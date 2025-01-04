@@ -21,7 +21,8 @@ POSTGRES_DB = os.getenv('POSTGRES_DB')
 POSTGRES_HOST = os.getenv('POSTGRES_HOST')
 POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 
-#%% plot rides of one bike over time
+# %% 
+# plot rides of one bike over time
 conn = psycopg2.connect(
     host=POSTGRES_HOST,
     database=POSTGRES_DB,
