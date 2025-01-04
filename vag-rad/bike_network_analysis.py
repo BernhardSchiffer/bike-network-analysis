@@ -10,47 +10,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import osmium
 from collections import Counter
-import shapely
 
-# %%
-# helper functions
-# calculate length of edges of a graph
-def get_path_length(graph):
-    if len(graph.edges) > 0:
-        edges = ox.graph_to_gdfs(graph, nodes=False, edges=True)
-        return sum(edges['length'])
-    else:
-        return 0
-
-# plot edges of a graph on to a folium map
-def plot_graph(graph, map=folium.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857'), color='blue'):
-    if(len(graph.edges) > 0):
-        df = ox.graph_to_gdfs(graph, nodes=False)
-        for t in df['geometry'].values:
-            coordinates = []
-            for c in t.coords[:]:
-                coordinates.append((c[1], c[0]))
-            folium.PolyLine(coordinates, color=color).add_to(map)
-    return map
-
-# osmium filter that checks if node or one of way nodes is in polygon
-class PolygonFilter:
-    def __init__(self, polygon):
-        self.polygon = polygon
-
-    def node(self, n):
-        is_not_in_place = True
-        if n.location.valid() and self.polygon.contains(shapely.Point(n.lon, n.lat)):
-            is_not_in_place = False
-        return is_not_in_place
-
-    def way(self, w):
-        is_not_in_place = True
-        for n in w.nodes:
-            if n.location.valid() and self.polygon.contains(shapely.Point(n.lon, n.lat)):
-                is_not_in_place = False
-                break
-        return is_not_in_place
+from utils.polygon_filter import PolygonFilter
+from utils.utils import *
 
 # %% 
 # evaluation of osm features in Nürnberg
@@ -66,6 +28,8 @@ print("Of which are ways within Nürnberg:",
 # get all osm tags of ways in Nürnberg
 place = ox.geocode_to_gdf('Nürnberg')
 stats = Counter()
+
+edges_in_nbg = []
 
 for w in osmium.FileProcessor('mittelfranken-latest.osm.pbf').with_locations().with_filter(osmium.filter.EmptyTagFilter()).with_filter(osmium.filter.EntityFilter(osmium.osm.WAY)).with_filter(PolygonFilter(place.geometry[0])):
     for k, v in w.tags:
