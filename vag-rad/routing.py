@@ -16,21 +16,30 @@ import time
 import osmium
 from utils.polygon_filter import PolygonFilter
 from utils.utils import *
+import pickle
+import copy
+import numpy as np
+import igraph as ig
 
 # %%
 # helper functions
 # plot routes on a map
-def plot_routes(routes: list[list[int] | None], graph: nx.MultiDiGraph):
+def plot_routes(routes: list[list[int] | None], graph: nx.MultiDiGraph, with_markers: bool = False):
     nodes = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
     map = folium.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
 
-    for route in routes:
-        if(route):
+    for idx, route in enumerate(routes):
+        if with_markers:
+            start_node = nodes.loc[route[0]]
+            end_node = nodes.loc[route[-1]]
+            folium.Marker((start_node['y'], start_node['x']), 'start').add_to(map)
+            folium.Marker((end_node['y'], end_node['x']), 'destination').add_to(map)
+        if route:
             positions = []
             for node_id in route:
                 node = nodes.loc[node_id]
                 positions.append((node['y'], node['x']))
-            folium.PolyLine(positions).add_to(map)
+            folium.PolyLine(positions, idx).add_to(map)
 
     return map
 
@@ -159,11 +168,11 @@ print(f'finished calculating nearest nodes in {end - start} seconds')
 
 print('start calculating routes')
 start = time.time()
-routes = ox.routing.shortest_path(graph, starting_node_ids, finishing_node_ids, cpus=1)
+shortest_routes = ox.routing.shortest_path(graph, starting_node_ids, finishing_node_ids, cpus=1)
 end = time.time()
 print(f'finished calculating routes in {end - start} seconds')
 
-plot_heat_map_of_edges(routes, graph)
+plot_heat_map_of_edges(shortest_routes, graph)
 
 # %%
 # create lookup table for all edges in nuernberg with all their osm features
@@ -202,9 +211,9 @@ bike_road_filter: list[tuple[str, str]] = [
     ('bicycle_road', 'yes')
 ]
 
-bike_lanes_separate = (bike_path_filter, 0.5)
+bike_lanes_separate = (bike_path_filter, 0.8)
 
-bike_lanes_on_road = (bike_lane_filter, 0.8)
+bike_lanes_on_road = (bike_lane_filter, 0.9)
 
 benefit_lookup = [bike_lanes_separate, bike_lanes_on_road]
 
@@ -252,7 +261,8 @@ if len(problematic_osmids) > 0:
 
 # %%
 # add weight attribute to graph
-nx.set_edge_attributes(graph, weight)
+weighted_graph = copy.deepcopy(graph)
+nx.set_edge_attributes(weighted_graph, weight)
 
 # %%
 # calculate trips based on the new weight metric based on osm features
@@ -266,20 +276,145 @@ print('start calculating nearest nodes')
 start = time.time()
 x = [p.x for p in starting_positions]
 y = [p.y for p in starting_positions]
-starting_node_ids = ox.distance.nearest_nodes(graph, x, y)
+starting_node_ids = ox.distance.nearest_nodes(weighted_graph, x, y)
 
 x = [p.x for p in finishing_positions]
 y = [p.y for p in finishing_positions]
-finishing_node_ids = ox.distance.nearest_nodes(graph, x, y)
+finishing_node_ids = ox.distance.nearest_nodes(weighted_graph, x, y)
 end = time.time()
 print(f'finished calculating nearest nodes in {end - start} seconds')
 
 print('start calculating routes')
 start = time.time()
-routes = ox.routing.shortest_path(graph, starting_node_ids, finishing_node_ids, cpus=1, weight='weight')
+routes = ox.routing.shortest_path(weighted_graph, starting_node_ids, finishing_node_ids, cpus=1, weight='weight')
 end = time.time()
 print(f'finished calculating routes in {end - start} seconds')
+# %%
+# write calculated routes on file
+file = open('calculated_routes.txt', 'wb')
+pickle.dump(routes, file)
+file.close()
+# %%
+# load calculated routes from file
+with open('calculated_routes.txt', 'rb') as f:
+    routes = pickle.load(f)
 
+# %%
+# plot heatmap of calculated routes
 plot_heat_map_of_edges(routes, graph)
+
+# %%
+# calculate detour factor of routes
+def correct_routes(route: list[int]) -> bool:
+    return route != None and len(route) > 1
+
+shortest_routes = list(filter(correct_routes, shortest_routes))
+routes = list(filter(correct_routes, routes))
+
+shortests_route_lenghts = []
+for route in shortest_routes:
+    df = ox.routing.route_to_gdf(graph, route)
+    route_length = df['length'].sum()
+    shortests_route_lenghts.append(route_length)
+
+weighted_route_lengths = []
+for route in routes:
+    df = ox.routing.route_to_gdf(weighted_graph, route)
+    route_length = df['length'].sum()
+    weighted_route_lengths.append(route_length)
+
+# %%
+detour_factors = []
+for s_length, w_length in zip(shortests_route_lenghts, weighted_route_lengths):
+    detour_factor = w_length / s_length
+    detour_factors.append(detour_factor)
+# %%
+avg_detour_factor = np.average(detour_factors)
+median_detour_factor = np.median(detour_factors)
+
+print(f'average detour factor: {avg_detour_factor}')
+print(f'median detour factor: {median_detour_factor}')
+# %%
+plt.boxplot(detour_factors)
+# %%
+max_value = max(detour_factors)
+idx_max_value = detour_factors.index(max_value)
+
+plot_routes([shortest_routes[idx_max_value], routes[idx_max_value]], graph, with_markers=True)
+
+# %%
+# explore routes with certain detour factors
+limit = 10
+count = 0
+for detour_factor, shortest_route, weighted_route in zip(detour_factors, shortest_routes, routes):
+    if detour_factor > 1.0 and detour_factor < 1.2:
+        print(f'detour factor: {detour_factor}')
+        map = plot_routes([shortest_route, weighted_route], graph, with_markers=True)
+        display(map)
+
+    if limit != None:
+        count = count + 1
+        if count >= limit:
+            break
+# %%
+# calculate betweenness centrality of all edges in graph
+radius = 2500
+start_nodes = []
+dest_nodes= []
+edges_counter = Counter()
+count = 0
+# for every node
+print(f'start finding routes')
+start = time.time()
+for node in weighted_graph.nodes():
+# get every node within certain range
+    subgraph = nx.ego_graph(weighted_graph, node, radius=radius, distance='length')
+
+    dest_nodes = dest_nodes + list(subgraph.nodes())
+    start_nodes = start_nodes + ([node] * len(subgraph.nodes()))
+    count = count + 1
+    if count >= 100:
+        break
+
+end = time.time()
+print(f'found {len(dest_nodes)} routes in {end - start} seconds')
+
+# shortest path between all of them
+print(f'start calculating {len(dest_nodes)} routes')
+start = time.time()
+routes = ox.shortest_path(weighted_graph, start_nodes, dest_nodes, weight='weight')
+end = time.time()
+print(f'calculated {len(routes)} routes in {end - start} seconds')
+
+plot_heat_map_of_edges(routes, weighted_graph)
+
+# %%
+wg: ig.Graph = ig.Graph.from_networkx(weighted_graph)
+
+# %%
+ebc = wg.edge_betweenness(directed = False, cutoff = 4500, weights = "weight")
+
+# %%
+nodes = ox.graph_to_gdfs(weighted_graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
+cmap = plt.get_cmap('turbo')
+map = folium.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
+
+max_value = max(ebc)
+
+for edge, count in zip(weighted_graph.edges(), ebc):
+    positions = []
+    for node_id in edge:
+        node = nodes.loc[node_id]
+        positions.append((node['y'], node['x']))
+    color = matplotlib.colors.to_hex(cmap(count/max_value))
+    folium.PolyLine(positions, color=color, tooltip=count).add_to(map)
+
+display(map)
+
+fig, ax = plt.subplots(figsize=(4,0.4))
+colorbar = matplotlib.colorbar.ColorbarBase(ax, cmap=cmap, orientation = 'horizontal')
+tick = int(max_value/5)
+colorbar.set_ticklabels([0, tick, tick*2, tick*3, tick*4, max_value])
+plt.show()
 
 # %%
