@@ -19,6 +19,7 @@ from utils.utils import *
 import pickle
 import numpy as np
 import igraph as ig
+import leafmap.foliumap as leafmap
 
 CPU_COUNT = 16
 
@@ -57,7 +58,7 @@ def plot_heat_map_of_edges(routes: list[list[int] | None], graph: nx.MultiDiGrap
                 edges_counter.update([(start_node, node)])
                 start_node = node
 
-    map = folium.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
+    map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
 
     max_value = edges_counter.most_common(1)[0][1]
 
@@ -69,14 +70,19 @@ def plot_heat_map_of_edges(routes: list[list[int] | None], graph: nx.MultiDiGrap
         color = matplotlib.colors.to_hex(cmap(count/max_value))
         folium.PolyLine(positions, color=color, tooltip=count).add_to(map)
 
-    #display(map)
+    colormap = {
+        "width": 4.0,
+        "height": 0.3,
+        "vmin": 0,
+        "vmax": max_value,
+        "cmap": 'turbo',
+        "label": "trip count",
+        "orientation": "horizontal",
+        "transparent": False,
+    }
+    
+    map.add_colormap(position=(55,3), **colormap)
     return map
-
-    fig, ax = plt.subplots(figsize=(4,0.4))
-    colorbar = matplotlib.colorbar.ColorbarBase(ax, cmap=cmap, orientation = 'horizontal')
-    tick = int(max_value/5)
-    colorbar.set_ticklabels([0, tick, tick*2, tick*3, tick*4, max_value])
-    plt.show()
 
 # %% 
 # use specific overpass settings
