@@ -28,7 +28,7 @@ CPU_COUNT = 16
 # plot routes on a map
 def plot_routes(routes: list[list[int] | None], graph: nx.MultiDiGraph, with_markers: bool = False):
     nodes = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
-    map = folium.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
+    map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
 
     for idx, route in enumerate(routes):
         if with_markers:
@@ -69,19 +69,8 @@ def plot_heat_map_of_edges(routes: list[list[int] | None], graph: nx.MultiDiGrap
             positions.append((node['y'], node['x']))
         color = matplotlib.colors.to_hex(cmap(count/max_value))
         folium.PolyLine(positions, color=color, tooltip=count).add_to(map)
-
-    colormap = {
-        "width": 4.0,
-        "height": 0.3,
-        "vmin": 0,
-        "vmax": max_value,
-        "cmap": 'turbo',
-        "label": "trip count",
-        "orientation": "horizontal",
-        "transparent": False,
-    }
     
-    map.add_colormap(position=(55,3), **colormap)
+    map.add_colormap(position='bottomright', width=4.0, height=0.3, vmin=0, vmax=max_value, cmap='turbo')
     return map
 
 # %% 
@@ -447,7 +436,7 @@ ebc = wg.edge_betweenness(directed = False, cutoff = 4500, weights = "weight")
 # %%
 nodes = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
 cmap = plt.get_cmap('turbo')
-map = folium.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
+map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
 
 max_value = max(ebc)
 
@@ -459,12 +448,7 @@ for edge, count in zip(graph.edges(), ebc):
     color = matplotlib.colors.to_hex(cmap(count/max_value))
     folium.PolyLine(positions, color=color, tooltip=count).add_to(map)
 
-display(map)
-
-fig, ax = plt.subplots(figsize=(4,0.4))
-colorbar = matplotlib.colorbar.ColorbarBase(ax, cmap=cmap, orientation = 'horizontal')
-tick = int(max_value/5)
-colorbar.set_ticklabels([0, tick, tick*2, tick*3, tick*4, max_value])
-plt.show()
+map.add_colormap(position=(55,3), width=4.0, height=0.3, vmin=0, vmax=max_value, cmap='turbo')
+map
 
 # %%
