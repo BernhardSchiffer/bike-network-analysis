@@ -10,6 +10,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from  matplotlib.ticker import FuncFormatter
 import datetime
+from dateutil.tz import tzutc
+from dateutil.parser import parse
+import pytz
+
+def date_utc(s):
+    return parse(s, tzinfos=tzutc)
 
 #%%
 # Setup environment
@@ -290,22 +296,22 @@ conn = psycopg2.connect(
     password=POSTGRES_PASSWORD,
     port=POSTGRES_PORT)
 
-df_rides_group_by_hour = pd.read_sql_query("""select date_part('hour', r.starting_time) as hour, count(*) as count from rides r
+df_rides_group_by_hour = pd.read_sql_query("""select date_part('hour', r.starting_time at time zone 'utc') as hour, count(*) as count from rides r
                 where ST_Distance(r.starting_position, r.finishing_position) < 20000
                 and ST_Distance(r.starting_position, r.finishing_position) > 150 
                 and r.starting_time::date != '2023-10-10'
                 and r.starting_time::date != '2023-10-11'
-                group by date_part('hour', r.starting_time);"""
-                ,con=conn)
+                group by date_part('hour', r.starting_time at time zone 'utc');"""
+                ,con=conn, parse_dates=date_utc)
 
-df_hours = pd.read_sql_query("""select date_part('hour', hours.h) as hour, count(*) as count from 
-                    (select distinct(date_trunc('hour', r.starting_time)) as h from rides r
+df_hours = pd.read_sql_query("""select date_part('hour', hours.h at time zone 'utc') as hour, count(*) as count from 
+                    (select distinct(date_trunc('hour', r.starting_time at time zone 'utc')) as h from rides r
                     where ST_Distance(r.starting_position, r.finishing_position) < 20000
                     and ST_Distance(r.starting_position, r.finishing_position) > 150 
                     and r.starting_time::date != '2023-10-10'
                     and r.starting_time::date != '2023-10-11') hours 
-                group by date_part('hour', hours.h);"""
-                ,con=conn)
+                group by date_part('hour', hours.h at time zone 'utc');"""
+                ,con=conn, parse_dates=date_utc)
 
 conn.close()
 df_rides_group_by_hour
@@ -333,20 +339,79 @@ conn = psycopg2.connect(
     password=POSTGRES_PASSWORD,
     port=POSTGRES_PORT)
 
-df_rides_group_by_hour_per_day = pd.read_sql_query("""select date_trunc('hour', r.starting_time) as hour, count(*) as count from rides r
+df_rides_group_by_hour_per_day = pd.read_sql_query("""select date_trunc('hour', r.starting_time at time zone 'utc') as hour, count(*) as count from rides r
                 where ST_Distance(r.starting_position, r.finishing_position) < 20000
                 and ST_Distance(r.starting_position, r.finishing_position) > 150 
                 and r.starting_time::date != '2023-10-10'
                 and r.starting_time::date != '2023-10-11'
-                group by date_trunc('hour', r.starting_time);"""
-                ,con=conn)
+                group by date_trunc('hour', r.starting_time at time zone 'utc');"""
+                ,con=conn, parse_dates=date_utc)
 
 conn.close()
 df_rides_group_by_hour_per_day
 
+#%% 
+my_timezone = pytz.timezone('Europe/Berlin')
+df_rides_group_by_hour_per_day['hour'].dt.tz_convert(my_timezone)
+#%%
+my_timezone
 # %%
 plt.figure();
 ax = df_rides_group_by_hour_per_day[:][204:700].plot.bar(x='hour', y='count', figsize=(25, 5), width=1, align='edge')
 plt.xticks(rotation=90, size=6)
 plt.show()
+# %%
+# explore the trip duration
+conn = psycopg2.connect(
+    host=POSTGRES_HOST,
+    database=POSTGRES_DB,
+    user=POSTGRES_USER,
+    password=POSTGRES_PASSWORD,
+    port=POSTGRES_PORT)
+
+sql = f"""select r.* from rides r;"""
+finishing_pos_sql = f"""select r.id, r.finishing_position from rides r;"""
+df = gpd.read_postgis(
+    sql, 
+    conn, 
+    geom_col='starting_position', 
+    parse_dates='%Y-%m-%d %H:%M:%S')
+
+finishing_pos = gpd.read_postgis(
+    finishing_pos_sql, 
+    conn, 
+    geom_col='finishing_position')
+df.drop('finishing_position', axis=1, inplace=True)
+df = df.merge(finishing_pos, on='id')
+conn.close()
+
+df = df.assign(duration=(df['finishing_time'] - df['starting_time']).values)
+# %%
+df['duration'] = df['duration'].apply(lambda x: int(x.seconds /60))
+
+# %%
+from collections import Counter
+c = Counter()
+for d in df['duration']:
+    c.update([d])
+# %%
+# %%
+sorted(c.items(), key=lambda x: x[0])
+# %%
+filtered_values = list(filter(lambda x: x <= 60*24 and x > 1, df['duration'].values))
+
+plt.hist(filtered_values, bins=max(filtered_values))
+print(c.most_common(10))
+# %%
+import numpy as np
+plt.boxplot(filtered_values)
+print(f'median: {np.median(filtered_values)}')
+print(f'average: {np.average(filtered_values)}')
+print(f'75 percentile: {np.percentile(filtered_values, 75)}')
+print(f'85 percentile: {np.percentile(filtered_values, 85)}')
+print(f'95 percentile: {np.percentile(filtered_values, 95)}')
+print(f'99 percentile: {np.percentile(filtered_values, 99)}')
+# %%
+most_common_values = list(filter(lambda x: x <= 60 and x > 1, df['duration'].values))
+plt.boxplot(most_common_values)
 # %%
