@@ -21,7 +21,7 @@ import numpy as np
 import igraph as ig
 import leafmap.foliumap as leafmap
 
-CPU_COUNT = 16
+CPU_COUNT = 1
 
 # %%
 # helper functions
@@ -120,14 +120,14 @@ sql = f"""select r.* from rides r
             and r.starting_time::date != '2023-10-10'
             and r.starting_time::date != '2023-10-11'
             order by r.bike_id, r.starting_time
-            limit 100000;"""
+            limit 10000;"""
 finishing_pos_sql = f"""select r.id, r.finishing_position from rides r
                         where ST_Distance(r.starting_position, r.finishing_position) < 20000
                         and ST_Distance(r.starting_position, r.finishing_position) > 150 
                         and r.starting_time::date != '2023-10-10'
                         and r.starting_time::date != '2023-10-11'
                         order by r.bike_id, r.starting_time
-                        limit 100000;"""
+                        limit 10000;"""
 
 df = gpd.read_postgis(
     sql, 
@@ -145,7 +145,7 @@ conn.close()
 
 # %%
 # calculate shortest routes and plot on map
-trips = df.head(100000)
+trips = df.head(10000)
 print(f'{len(trips)} trips')
 
 starting_positions = trips['starting_position']
@@ -170,11 +170,11 @@ end = time.time()
 print(f'finished calculating routes in {end - start} seconds')
 
 # %%
-plot_heat_map_of_edges(shortest_routes, graph).save('shortest_routes.html')
+plot_heat_map_of_edges(shortest_routes, graph)#.save('shortest_routes.html')
 
 # %%
 # load calculated routes from file
-edge_lookup_filename = 'osm_edges_with_attributes.txt'
+edge_lookup_filename = 'osm_edges_with_attributes.pickle'
 
 if os.path.isfile(edge_lookup_filename):
     with open(edge_lookup_filename, 'rb') as f:
@@ -305,7 +305,7 @@ nx.set_edge_attributes(graph, weights)
 
 # %%
 # calculate trips based on the new weight metric based on osm features
-trips = df.head(100000)
+trips = df.head(10000)
 print(f'{len(trips)} trips')
 
 starting_positions = trips['starting_position']
@@ -330,26 +330,27 @@ end = time.time()
 print(f'finished calculating routes in {end - start} seconds')
 # %%
 # write calculated routes on file
-file = open('calculated_routes.txt', 'wb')
+file = open('calculated_routes.pickle', 'wb')
 pickle.dump(routes, file)
 file.close()
 # %%
 # load calculated routes from file
-with open('calculated_routes.txt', 'rb') as f:
+with open('calculated_routes.pickle', 'rb') as f:
     routes = pickle.load(f)
 
 # %%
 # plot heatmap of calculated routes
-plot_heat_map_of_edges(routes, graph).save('weighted_routes.html')
+plot_heat_map_of_edges(routes, graph)#.save('weighted_routes.html')
 
 # %%
 # calculate detour factor of routes
 def correct_routes(route: list[int]) -> bool:
     return route != None and len(route) > 1
 
-shortest_routes = list(filter(correct_routes, shortest_routes))
-routes = list(filter(correct_routes, routes))
 
+#shortest_routes = list(filter(correct_routes, shortest_routes))
+routes = list(filter(correct_routes, routes))
+#%%
 shortest_route_lenghts = []
 for route in shortest_routes:
     r = ox.routing.route_to_gdf(graph, route)
@@ -451,4 +452,109 @@ for edge, count in zip(graph.edges(), ebc):
 map.add_colormap(position=(55,3), width=4.0, height=0.3, vmin=0, vmax=max_value, cmap='turbo')
 map
 
+# %%
+# fetch graph of bicycle infrastructure
+place_name = 'Nürnberg'
+network_type = 'bike'
+bike_lane_filter = [
+    '["cycleway"="lane"]',
+    '["cycleway:right"="lane"]',
+    '["cycleway:left"="lane"]',
+    '["cycleway:both"="lane"]',
+    '["cycleway"="opposite"]'
+]
+bike_path_filter = [
+    '["bicycle"="designated"]',
+    '["highway"="cycleway"]',
+    '["cycleway"="track"]',
+    '["cycleway:right"="track"]',
+    '["cycleway:left"="track"]',
+    '["cycleway:both"="track"]'
+]
+bike_road_filter = [
+    '["bicycle_road"="yes"]'
+]
+custom_filter = bike_path_filter
+bike_infra_graph = ox.graph_from_place(query=place_name, retain_all=True, simplify=False, custom_filter=custom_filter)
+
+# %%
+# finding gaps between bicycle paths
+print(f'start finding gaps between bike paths on routes')
+start = time.time()
+gaps = []
+not_gap = []
+bike_infra_edges = ox.graph_to_gdfs(bike_infra_graph, edges=True, nodes=False)
+for route in routes:
+    es = ox.routing.route_to_gdf(graph, route, weight='weight')
+    for idx, row in es.iterrows():
+        if row['osmid'] not in bike_infra_edges['osmid'].values:
+            gaps.append(row)
+        else:
+            not_gap.append(row)
+gaps_df = gpd.GeoDataFrame(gaps)
+end = time.time()
+print(f'found {len(gaps)} gaps in {end - start} seconds')
+
+# %%
+def calc_benefits(edges: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    edges_counter = Counter()
+
+    for idx, e in edges.iterrows():
+        edges_counter.update([idx])
+
+    edges = edges.drop_duplicates(inplace=False)
+
+    benefits = []
+    for idx, data in edges.iterrows():
+        benefit = data['length'] * edges_counter[idx]
+        benefits.append(benefit)
+    edges = edges.assign(benefit=benefits)
+    return edges
+
+def plot_edge_heatmap(edges: gpd.GeoDataFrame):
+    cmap = plt.get_cmap('Reds')
+    edges_counter = Counter()
+
+    for idx, e in edges.iterrows():
+        edges_counter.update([idx])
+
+    edges = edges.drop_duplicates(inplace=False)
+
+    benefits = []
+    for idx, data in edges.iterrows():
+        benefit = data['length'] * edges_counter[idx]
+        benefits.append(benefit)
+    edges = edges.assign(benefit=benefits)
+
+    benefits = []
+    counts = []
+    for idx, data in edges.iterrows():
+        benefits.append(data['benefit'])
+        counts.append(edges_counter[idx])
+    plt.scatter(counts, benefits)
+    plt.show()
+
+    max_benefit = max(edges['benefit'].values)
+
+    map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
+
+    max_count = edges_counter.most_common(1)[0][1]
+
+    for edge_id, data in edges.iterrows():
+        p1, p2 = data['geometry'].coords
+        p1 = (p1[1], p1[0])
+        p2 = (p2[1], p2[0])
+        color = matplotlib.colors.to_hex(cmap(data['benefit']/max_benefit))
+        folium.PolyLine((p1, p2), color=color, tooltip=f"count: {edges_counter[edge_id]}; benefit: {data['benefit']}", weight=(edges_counter[edge_id]/max_count)*5+1).add_to(map)
+    
+    map.add_colormap(position='bottomright', width=4.0, height=0.3, vmin=0, vmax=max_benefit, cmap='Reds')
+    return map
+
+plot_edge_heatmap(gaps_df)
+
+# %%
+not_gap_df = gpd.GeoDataFrame(not_gap)
+
+# %%
+plot_edge_heatmap(not_gap_df)
 # %%
