@@ -6,3 +6,5 @@ logs/
 cache/
 dump/*.dat*
 __pycache__
+*.html
+*.png
