@@ -376,28 +376,34 @@ median_detour_factor = np.median(detour_factors)
 
 print(f'average detour factor: {avg_detour_factor}')
 print(f'median detour factor: {median_detour_factor}')
+print(f'75 percentile: {np.percentile(detour_factors, 75)}')
+print(f'85 percentile: {np.percentile(detour_factors, 85)}')
+print(f'95 percentile: {np.percentile(detour_factors, 95)}')
+print(f'99 percentile: {np.percentile(detour_factors, 99)}')
+
 # %%
 plt.boxplot(detour_factors)
 # %%
 max_value = max(detour_factors)
 idx_max_value = detour_factors.index(max_value)
 
-plot_routes([shortest_routes[idx_max_value], routes[idx_max_value]], graph, with_markers=True)
+plot_routes([shortest_routes[idx_max_value], routes[idx_max_value]], graph, with_markers=True).save('max_detour_factor.html')
+print(max_value)
 
 # %%
 # explore routes with certain detour factors
 limit = 10
 count = 0
 for detour_factor, shortest_route, weighted_route in zip(detour_factors, shortest_routes, routes):
-    if detour_factor > 1.0 and detour_factor < 1.2:
+    if detour_factor > 3.0 and detour_factor < 5.0:
         print(f'detour factor: {detour_factor}')
         map = plot_routes([shortest_route, weighted_route], graph, with_markers=True)
-        display(map)
+        map.save(f'detour_factor_{detour_factor}.html')
 
-    if limit != None:
-        count = count + 1
-        if count >= limit:
-            break
+        if limit != None:
+            count = count + 1
+            if count >= limit:
+                break
 # %%
 # calculate betweenness centrality of all edges in graph
 radius = 2500
