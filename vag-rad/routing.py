@@ -564,3 +564,47 @@ not_gap_df = gpd.GeoDataFrame(not_gap)
 # %%
 plot_edge_heatmap(not_gap_df)
 # %%
+
+import networkx as nx
+
+G = nx.MultiDiGraph()
+G.add_edges_from([
+    (1, 5),
+    (5, 1),
+    (2, 5),
+    (5, 2),
+    (3, 5),
+    (5, 3),
+    (4, 5),
+    (5, 4)
+])
+print('G edges:', G.edges)
+H = nx.DiGraph(G)
+print('H edges:', H.edges)
+# %%
+nx.draw(G)
+
+# %%
+
+print('graph edges:', graph.edges(data=True, keys=True))
+# %%
+for e in graph.edges(data=True, keys=True):
+    if e[2] != 0:
+        print(e)
+# %%
+graph.edges[12384540497, 30964350, 0]
+# %%
+graph.edges[30964350, 12384540497, 0]
+# %%
+graph.edges[12249878, 9847072069, 0]
+# %%
+graph.edges[9847072069, 12249878, 0]
+# %%
+graph.nodes[12249878]
+# %%
+len(graph.edges)
+# %%
+len(nx.DiGraph(graph).edges)
+# %%
+len(graph.nodes)
+# %%
