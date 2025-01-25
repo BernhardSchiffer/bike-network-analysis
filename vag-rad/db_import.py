@@ -14,6 +14,7 @@ import shutil
 import csv
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.dates import DayLocator
 
 #%%
 # Setup environment
@@ -549,13 +550,20 @@ with open('available_bikes_per_day.csv', 'r', newline='') as csvfile:
     ax.boxplot(monthly_available_bikes.values())
     ax.set_xticklabels(monthly_available_bikes.keys())
 # %%
-from matplotlib.dates import DateFormatter, DayLocator, HourLocator
+x_data = []
+y_data = []
+for date in pd.date_range('2023-01', '2024-02', freq='D'):
+    x_data.append(date.date().isoformat())
+    b = available_bikes.get(date.date().isoformat(), None)
+    if b is None:
+        y_data.append(None)
+    else:
+        y_data.append(len(b))
+
 f, ax = plt.subplots(1)
-x_data = [k for k, v in available_bikes.items()]
-y_data = [len(v) for k, v in available_bikes.items()]
 plt.plot(x_data, y_data)
 plt.xticks(rotation=45)
-ax.set_ylim(ymin=0, ymax=max(y_data) + 200)
+ax.set_ylim(ymin=0, ymax=max([x for x in y_data if x is not None]) + 200)
 ax.xaxis.set_major_locator(DayLocator(interval=7))
 ax.xaxis.set_minor_locator(DayLocator())
 fig.tight_layout()
