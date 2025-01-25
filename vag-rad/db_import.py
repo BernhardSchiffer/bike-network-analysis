@@ -11,6 +11,9 @@ from dotenv import load_dotenv
 import tarfile
 import datetime
 import shutil
+import csv
+import matplotlib.pyplot as plt
+import numpy as np
 
 #%%
 # Setup environment
@@ -433,3 +436,128 @@ bike_df
 #%%
 filtered = bike_df.query(f'first_seen <= "2023-10-23 13:06:02.819823"')
 filtered.sort_values(by=['first_seen'], ascending=True).tail(1)['id'].item()
+
+# %%
+# get unique bikes per day
+def get_bikes_from_file(filename):
+    #print(f"get bikes from: {filename}")
+    f = open(f"{filename}", "r")
+    try:
+        data = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f'Exception {e} while parsing {filename}')
+        return
+    
+    bike_records = set()
+
+    try:
+        places = data['countries'][0]['cities'][0]['places']
+    except Exception as e:
+        print(f'Error {e} with {filename}. No places found')
+        return
+
+    for place in places:
+        # bikes parked at stations
+        if place['spot'] == True and place['bike'] == False:
+            for bike in place['bike_list']:
+                bike_records.add(bike['number'])
+        # bikes not parked at stations e.g. parked in the free floating area  
+        if place['spot'] == False and place['bike'] == True:
+            bike_records.add(place['bike_list'][0]['number'])
+
+    return bike_records
+
+def handler(func, path, exc_info):
+    print("Inside handler")
+    print(exc_info)
+
+directory = './scraping_data/'
+
+with open('available_bikes_per_day.csv', 'w', newline='') as csvfile:
+    fieldnames = ['date', 'bikes']
+    writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
+    writer.writeheader()
+
+dates = pd.date_range('2023-05-22', '2023-08-31')
+for date in dates:
+    print(date.date())
+    path = f'{directory}{date.date()}'
+    date_string = str(date.date())
+    file = get_files_in_daterange(directory, date_start=date_string, date_end=date_string)
+    if len(file) <= 0:
+        print(f'file for {date.date()} not found')
+        continue
+    else:
+        extract_archive_to_dir(file[0], path)
+
+    filenames = []
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            filenames.append(os.path.join(root, file))
+
+    unique_bikes = set()
+    with ThreadPool() as pool:
+        for bikes in pool.map(get_bikes_from_file, filenames, chunksize=60):
+            if bikes is not None:
+                unique_bikes.update(bikes)
+
+    with open('available_bikes_per_day.csv', 'a', newline='') as csvfile:
+        fieldnames = ['date', 'bikes']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
+        writer.writerows([
+            {'date': date.date(), 'bikes': ','.join(unique_bikes)}
+        ])
+
+    shutil.rmtree(path, onerror=handler)
+
+# %%
+# read csv
+def get_unique_bikes_in_date_range(dict, date_start, date_end):
+    unique_bikes = []
+
+    dates = pd.date_range(date_start, date_end)
+    for date in dates:
+        try:
+            unique_bikes.append(len(dict[date.date().isoformat()]))
+        except:
+            pass
+            
+    return unique_bikes
+
+with open('available_bikes_per_day.csv', 'r', newline='') as csvfile:
+    fieldnames = ['date', 'bikes']
+    reader = csv.DictReader(csvfile, fieldnames=fieldnames, delimiter=';')
+    # skip header
+    next(reader, None)
+
+    available_bikes = {}
+    for row in reader:
+        bikes = row['bikes'].split(',')
+        available_bikes[row['date']] = bikes
+
+    monthly_available_bikes = {}
+    for month_start, month_end in zip(pd.date_range('2023-01', '2024-02', freq='MS'), pd.date_range('2023-01', '2024-02', freq='M')):
+        monthly_available_bikes[f'{month_start.year} {month_start.date().strftime("%B")}'] = get_unique_bikes_in_date_range(available_bikes, month_start, month_end)
+
+    monthly_available_bikes = dict((k, v) for k, v in monthly_available_bikes.items() if len(v) > 0)
+
+    for k, v in monthly_available_bikes.items():
+        print(f'average available bikes in {k}: {np.mean(v)}')
+        print(f'median available bikes in {k}: {np.median(v)}')
+    
+    fig, ax = plt.subplots()
+    ax.boxplot(monthly_available_bikes.values())
+    ax.set_xticklabels(monthly_available_bikes.keys())
+# %%
+from matplotlib.dates import DateFormatter, DayLocator, HourLocator
+f, ax = plt.subplots(1)
+x_data = [k for k, v in available_bikes.items()]
+y_data = [len(v) for k, v in available_bikes.items()]
+plt.plot(x_data, y_data)
+plt.xticks(rotation=45)
+ax.set_ylim(ymin=0, ymax=max(y_data) + 200)
+ax.xaxis.set_major_locator(DayLocator(interval=7))
+ax.xaxis.set_minor_locator(DayLocator())
+fig.tight_layout()
+plt.show()
+# %%
