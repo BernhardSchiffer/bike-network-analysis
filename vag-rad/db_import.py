@@ -471,22 +471,14 @@ def handler(func, path, exc_info):
     print("Inside handler")
     print(exc_info)
 
-directory = './scraping_data/'
-
-with open('available_bikes_per_day.csv', 'w', newline='') as csvfile:
-    fieldnames = ['date', 'bikes']
-    writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
-    writer.writeheader()
-
-dates = pd.date_range('2023-05-22', '2023-08-31')
-for date in dates:
-    print(date.date())
+def get_available_bikes_per_date(date):
+    print(f'getting bikes for {date.date()}')
     path = f'{directory}{date.date()}'
     date_string = str(date.date())
     file = get_files_in_daterange(directory, date_start=date_string, date_end=date_string)
     if len(file) <= 0:
         print(f'file for {date.date()} not found')
-        continue
+        return None
     else:
         extract_archive_to_dir(file[0], path)
 
@@ -496,19 +488,53 @@ for date in dates:
             filenames.append(os.path.join(root, file))
 
     unique_bikes = set()
-    with ThreadPool() as pool:
-        for bikes in pool.map(get_bikes_from_file, filenames, chunksize=60):
-            if bikes is not None:
-                unique_bikes.update(bikes)
 
-    with open('available_bikes_per_day.csv', 'a', newline='') as csvfile:
-        fieldnames = ['date', 'bikes']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
-        writer.writerows([
-            {'date': date.date(), 'bikes': ','.join(unique_bikes)}
-        ])
+    for filename in filenames:
+        bikes = get_bikes_from_file(filename)
+        if bikes is not None:
+            unique_bikes.update(bikes)
 
     shutil.rmtree(path, onerror=handler)
+
+    return (date, unique_bikes)
+
+directory = './scraping_data/'
+overwrite = False
+
+available_bikes_filename = 'available_bikes_per_day.csv'
+fieldnames = ['date', 'bikes']
+
+available_bikes = {}
+
+if os.path.isfile(available_bikes_filename):
+    with open(available_bikes_filename, 'r', newline='') as csvfile:
+        reader = csv.DictReader(csvfile, fieldnames=fieldnames, delimiter=';')
+        # skip header
+        next(reader, None)
+
+        for row in reader:
+            bikes = row['bikes'].split(',')
+            available_bikes[row['date']] = bikes
+
+dates = pd.date_range('2023-05-22', '2025-01-31')
+for date in dates:
+    if overwrite is False and date.date().isoformat() in available_bikes:
+        print(f'bikes for {date.date()} are already there')
+        continue
+    else:
+        result = get_available_bikes_per_date(date)
+        if result is not None:
+            _, bikes = result
+            available_bikes[date.date().isoformat()] = list(bikes)
+
+with open(available_bikes_filename, 'w', newline='') as csvfile:
+    fieldnames = ['date', 'bikes']
+    writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
+    writer.writeheader()
+    sorted_bikes = dict(sorted(available_bikes.items()))
+    writer.writerows([
+        {'date': date, 'bikes': ','.join(unique_bikes)} for date, unique_bikes in available_bikes.items()
+    ])
 
 # %%
 # read csv
@@ -536,7 +562,7 @@ with open('available_bikes_per_day.csv', 'r', newline='') as csvfile:
         available_bikes[row['date']] = bikes
 
     monthly_available_bikes = {}
-    for month_start, month_end in zip(pd.date_range('2023-01', '2024-02', freq='MS'), pd.date_range('2023-01', '2024-02', freq='M')):
+    for month_start, month_end in zip(pd.date_range('2023-01', '2025-02', freq='MS'), pd.date_range('2023-01', '2025-02', freq='M')):
         monthly_available_bikes[f'{month_start.year} {month_start.date().strftime("%B")}'] = get_unique_bikes_in_date_range(available_bikes, month_start, month_end)
 
     monthly_available_bikes = dict((k, v) for k, v in monthly_available_bikes.items() if len(v) > 0)
@@ -560,4 +586,5 @@ ax.xaxis.set_major_locator(DayLocator(interval=7))
 ax.xaxis.set_minor_locator(DayLocator())
 fig.tight_layout()
 plt.show()
+
 # %%
