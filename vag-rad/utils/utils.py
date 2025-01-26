@@ -2,6 +2,9 @@ import networkx as nx
 import osmnx as ox
 import folium
 import geopandas as gpd
+import tarfile
+import datetime
+import os
 
 # calculate length of edges of a graph
 def get_path_length(graph: nx.MultiGraph | nx.MultiDiGraph):
@@ -31,3 +34,33 @@ def get_list_of_edges(osmids: list[str], df: gpd.GeoDataFrame):
         else:
             merged_df = tmp
     return merged_df
+
+# read files from archives
+def get_files_in_daterange(path: str, date_start = None, date_end = None):
+    file_names = []
+    if date_start is None:
+        start_date = datetime.datetime.min
+    else:
+        start_date = datetime.datetime.strptime(date_start, '%Y-%m-%d')
+
+    if date_end is None:
+        end_date = datetime.datetime.max
+    else:
+        end_date = datetime.datetime.strptime(date_end, '%Y-%m-%d')
+
+    timestamp_pattern='%Y-%m-%d.tar.gz'
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            if file.endswith('.tar.gz'):
+                file_date = datetime.datetime.strptime(file, timestamp_pattern)
+                if start_date <= file_date <= end_date:
+                    file_names.append(os.path.join(root, file))
+    return file_names
+
+def extract_archive_to_dir(archive: str, directory_path: str):
+    with tarfile.open(archive, 'r:*') as r:
+        r.extractall(directory_path)
+
+def handler(func, path, exc_info):
+    print("Inside handler")
+    print(exc_info)
