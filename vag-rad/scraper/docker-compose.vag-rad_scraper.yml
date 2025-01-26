@@ -1,0 +1,54 @@
+version: "3.4"
+
+services:
+  scraper-nuernberg:
+    image: vag-rad-scraper
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    volumes:
+      - ${scraping_data_location}/nuernberg:/app/scraping_data
+      - ${log_location}/nuernberg:/app/logs
+    env_file:
+      - .env
+    environment:
+      API_URL: https://api.nextbike.net/maps/nextbike-live.json?city=626
+
+  scraper-fuerth:
+    image: vag-rad-scraper
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    volumes:
+      - ${scraping_data_location}/fuerth:/app/scraping_data
+      - ${log_location}/fuerth:/app/logs
+    env_file:
+      - .env
+    environment:
+      API_URL: https://api.nextbike.net/maps/nextbike-live.json?city=966
+
+  scraper-erlangen:
+    image: vag-rad-scraper
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    volumes:
+      - ${scraping_data_location}/erlangen:/app/scraping_data
+      - ${log_location}/erlangen:/app/logs
+    env_file:
+      - .env
+    environment:
+      API_URL: https://api.nextbike.net/maps/nextbike-live.json?city=829
+
+  scraper-schwabach:
+    image: vag-rad-scraper
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    volumes:
+      - ${scraping_data_location}/schwabach:/app/scraping_data
+      - ${log_location}/schwabach:/app/logs
+    env_file:
+      - .env
+    environment:
+      API_URL: https://api.nextbike.net/maps/nextbike-live.json?city=967
