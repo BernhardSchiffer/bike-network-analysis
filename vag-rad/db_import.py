@@ -529,7 +529,6 @@ for date in dates:
             available_bikes[date.date().isoformat()] = list(bikes)
 
 with open(available_bikes_filename, 'w', newline='') as csvfile:
-    fieldnames = ['date', 'bikes']
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
     writer.writeheader()
     sorted_bikes = dict(sorted(available_bikes.items()))
@@ -578,7 +577,7 @@ with open('available_bikes_per_day.csv', 'r', newline='') as csvfile:
 # %%
 x_data = []
 y_data = []
-for date in pd.date_range('2023-01', '2024-02', freq='D'):
+for date in pd.date_range('2023-01', '2025-02', freq='D'):
     x_data.append(date.date().isoformat())
     b = available_bikes.get(date.date().isoformat(), None)
     if b is None:
@@ -596,3 +595,43 @@ fig.tight_layout()
 plt.show()
 
 # %%
+
+for k, v in available_bikes.items():
+    if len(v) < 100:
+        print(f'{k}: available bikes {len(v)}')
+
+#%%
+available_bikes_filename = 'available_bikes_per_day.csv'
+fieldnames = ['date', 'bikes']
+available_bikes = {}
+
+with open(available_bikes_filename, 'r', newline='') as csvfile:
+    reader = csv.DictReader(csvfile, fieldnames=fieldnames, delimiter=';')
+    # skip header
+    next(reader, None)
+
+    for row in reader:
+        bikes = row['bikes'].split(',')
+        available_bikes[row['date']] = bikes
+
+list_of_compromised_days = [
+    '2024-02-18',
+    '2024-06-08',
+    '2024-08-09',
+    '2024-09-07',
+    '2024-09-08',
+    '2024-11-16'
+]
+
+for k in list_of_compromised_days:
+    print(f'{k}: available bikes {len(available_bikes[k])}')
+    available_bikes.pop(k)
+
+with open(available_bikes_filename, 'w', newline='') as csvfile:
+    fieldnames = ['date', 'bikes']
+    writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
+    writer.writeheader()
+    sorted_bikes = dict(sorted(available_bikes.items()))
+    writer.writerows([
+        {'date': date, 'bikes': ','.join(unique_bikes)} for date, unique_bikes in available_bikes.items()
+    ])
