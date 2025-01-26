@@ -14,7 +14,7 @@ import shutil
 import csv
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.dates import DayLocator
+from matplotlib.dates import DayLocator, MonthLocator, WeekdayLocator
 
 #%%
 # Setup environment
@@ -574,6 +574,11 @@ with open('available_bikes_per_day.csv', 'r', newline='') as csvfile:
     fig, ax = plt.subplots()
     ax.boxplot(monthly_available_bikes.values())
     ax.set_xticklabels(monthly_available_bikes.keys())
+    plt.xticks(rotation=45)
+    fig.set_size_inches(25, 10, forward=True)
+    fig.set_dpi(100)
+    plt.grid()
+    plt.show()
 # %%
 x_data = []
 y_data = []
@@ -585,13 +590,16 @@ for date in pd.date_range('2023-01', '2025-02', freq='D'):
     else:
         y_data.append(len(b))
 
-f, ax = plt.subplots(1)
+fig, ax = plt.subplots(1)
 plt.plot(x_data, y_data)
 plt.xticks(rotation=45)
 ax.set_ylim(ymin=0, ymax=max([x for x in y_data if x is not None]) + 200)
-ax.xaxis.set_major_locator(DayLocator(interval=7))
-ax.xaxis.set_minor_locator(DayLocator())
+ax.xaxis.set_major_locator(MonthLocator(interval=1))
+#ax.xaxis.set_minor_locator(WeekdayLocator())
+fig.set_size_inches(25, 10, forward=True)
+fig.set_dpi(100)
 fig.tight_layout()
+plt.grid()
 plt.show()
 
 # %%
