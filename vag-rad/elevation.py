@@ -14,6 +14,8 @@ z = dat.read()[0]
 print(dat.crs)
 # >>> CRS.from_epsg(4326)
 
+print(dat.profile)
+
 # check the bounding-box of the data
 print(dat.bounds)
 # >>> Out[49]: BoundingBox(left=-120.0, bottom=45.0, right=-117.0, top=48.0)
