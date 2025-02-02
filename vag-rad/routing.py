@@ -3,7 +3,6 @@
 import matplotlib.colorbar
 import osmnx as ox
 import networkx as nx
-import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 import psycopg2
@@ -13,8 +12,6 @@ import folium
 import geopandas as gpd
 from collections import Counter
 import time
-import osmium
-from utils.polygon_filter import PolygonFilter
 from utils.utils import *
 import pickle
 import numpy as np
@@ -173,137 +170,6 @@ print(f'finished calculating routes in {end - start} seconds')
 
 # %%
 plot_heat_map_of_edges(shortest_routes, graph).save('shortest_routes.html')
-
-# %%
-# load calculated routes from file
-edge_lookup_filename = 'osm_edges_with_attributes.pickle'
-
-if os.path.isfile(edge_lookup_filename):
-    with open(edge_lookup_filename, 'rb') as f:
-        edges_lookup = pickle.load(f)
-else:
-    # create lookup table for all edges in nuernberg with all their osm features
-    place = ox.geocode_to_gdf('Nürnberg')
-
-    edges_in_nbg = []
-
-    for w in osmium.FileProcessor('mittelfranken-latest.osm.pbf').with_locations().with_filter(osmium.filter.EmptyTagFilter()).with_filter(osmium.filter.EntityFilter(osmium.osm.WAY)).with_filter(PolygonFilter(place.geometry[0])):
-        obj = {}
-        obj['osmid'] = w.id
-        tags = {}
-        for k, v in w.tags:
-            tags[k] = v
-        obj['tags'] = tags
-        edges_in_nbg.append(obj)
-
-    edges_lookup = pd.DataFrame(edges_in_nbg).set_index('osmid')
-
-    # write calculated routes on file
-    file = open(edge_lookup_filename, 'wb')
-    pickle.dump(edges_lookup, file)
-    file.close()
-
-# %%
-# define benefits and penalties for edges according to their osm features
-bike_lane_filter: list[tuple[str, str]] = [
-    ("cycleway", "lane"),
-    ("cycleway:right", "lane"),
-    ("cycleway:left", "lane"),
-    ("cycleway:both", "lane"),
-    ("cycleway", "opposite")
-]
-bike_path_filter: list[tuple[str, str]] = [
-    ("bicycle", "designated"),
-    ("highway", "cycleway"),
-    ("cycleway", "track"),
-    ("cycleway:right", "track"),
-    ("cycleway:left", "track"),
-    ("cycleway:both", "track")
-]
-bike_road_filter: list[tuple[str, str]] = [
-    ('bicycle_road', 'yes')
-]
-primary_road_filter: list[tuple[str, str]] = [
-    ('highway', 'primary')
-]
-secondary_road_filter: list[tuple[str, str]] = [
-    ('highway', 'secondary')
-]
-tertiary_road_filter: list[tuple[str, str]] = [
-    ('highway', 'tertiary')
-]
-residential_road_filter: list[tuple[str, str]] = [
-    ('highway', 'residential')
-]
-
-bike_lanes_separate = (bike_path_filter, 0.84)
-bike_lanes_on_road = (bike_lane_filter, 0.84)
-bike_boulevard = (bike_road_filter, 0.90)
-primary_road = (primary_road_filter, 8.15)
-secondary_road = (secondary_road_filter, 2.40)
-tertiary_road = (tertiary_road_filter, 1.37)
-residential_road = (residential_road_filter, 1.10)
-
-benefit_lookup = [
-    bike_lanes_separate,
-    bike_lanes_on_road,
-    bike_boulevard,
-    primary_road,
-    secondary_road,
-    tertiary_road,
-    residential_road
-]
-
-def is_tag_available(attribute: str, value: str, tags: dict[str, str]) -> bool:
-    if attribute not in tags.keys():
-        return False
-    else:
-        return tags[attribute] == value
-    
-def any_attributes_present(filter_tags: tuple[str, str], edge_tags: dict[str, str]):
-    return any(is_tag_available(k, v, edge_tags) for k, v in filter_tags)
-
-
-def get_weight(osmid: int) -> float:
-    try:
-        tags = edges_lookup.loc[osmid, 'tags']
-    except:
-        raise ValueError(f'could not find edge with osmid {osmid}')
-    
-    b = None
-    for filter_tags, benefit in benefit_lookup:
-        if any_attributes_present(filter_tags, tags) and (b is None or benefit < b):
-            b = benefit
-
-    if b is not None:
-        return b
-    else:
-        return 1.0
-
-# %%
-# calculate edge weights according to their osm features
-print(f'starting to calculate edges weights')
-start = time.time()
-weights: dict[tuple[int, int], dict[str, float]] = {}
-problematic_osmids = []
-for u, v, k in graph.edges:
-    data = graph.edges[u,v,k]
-    try:
-        w = get_weight(data['osmid'])
-        weights[u,v,k] = {'weight': data['length'] * w}
-    except:
-        problematic_osmids.append(data['osmid'])
-
-end = time.time()
-print(f'successfully calculated weight of {len(weights)} edges in {end - start} seconds')
-
-if len(problematic_osmids) > 0:
-    print(f'found problems with {len(problematic_osmids)} edges')
-    get_list_of_edges(problematic_osmids, edges_lookup).explore()
-
-# %%
-# add weight attribute to graph
-nx.set_edge_attributes(graph, weights)
 
 # %%
 # calculate trips based on the new weight metric based on osm features
@@ -569,25 +435,3 @@ not_gap_df = gpd.GeoDataFrame(not_gap)
 
 # %%
 plot_edge_heatmap(not_gap_df)
-# %%
-
-import networkx as nx
-
-G = nx.MultiDiGraph()
-G.add_edges_from([
-    (1, 5),
-    (5, 1),
-    (2, 5),
-    (5, 2),
-    (3, 5),
-    (5, 3),
-    (4, 5),
-    (5, 4)
-])
-print('G edges:', G.edges)
-H = nx.DiGraph(G)
-print('H edges:', H.edges)
-# %%
-nx.draw(G)
-
-# %%
