@@ -39,7 +39,7 @@ def get_bikes_from_file(filename):
 
     return bike_records
 
-def get_available_bikes_per_date(date):
+def get_available_bikes_per_date(date, directory):
     print(f'getting bikes for {date.date()}')
     path = f'{directory}{date.date()}'
     date_string = str(date.date())
@@ -111,7 +111,7 @@ for city, city_data in cities.items():
             print(f'bikes for {date.date()} are already there')
             continue
         else:
-            result = get_available_bikes_per_date(date)
+            result = get_available_bikes_per_date(date, directory)
             if result is not None:
                 _, bikes = result
                 available_bikes[date.date().isoformat()] = list(bikes)
@@ -222,7 +222,7 @@ for city, city_data in cities.items():
 
 # %%
 # remove dates with falsy data
-available_bikes_filename = 'available_bikes_per_day.csv'
+available_bikes_filename = 'available_bikes_per_day_nuernberg.csv'
 fieldnames = ['date', 'bikes']
 available_bikes = {}
 
