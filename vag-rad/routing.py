@@ -70,13 +70,6 @@ def plot_heat_map_of_edges(routes: list[list[int] | None], graph: nx.MultiDiGrap
     map.add_colormap(position='bottomright', width=4.0, height=0.3, vmin=0, vmax=max_value, cmap='turbo')
     return map
 
-# %% 
-# use specific overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2024-11-30T00:00:00Z"]{maxsize}'
-# %% 
-# use default overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}]{maxsize}'
-
 #%%
 # Setup environment
 load_dotenv()
@@ -88,19 +81,15 @@ POSTGRES_HOST = os.getenv('POSTGRES_HOST')
 POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 
 # %% 
-# fetch graph of all streets available by bike
-place_name = 'Nürnberg'
+# load weighted graph from file
+graph = ox.io.load_graphml('weighted_graph.graphml')
 
-graph = ox.graph_from_place(query=place_name, simplify=False, retain_all=True, network_type='bike')
-
-# %% 
 # some statistics of the graph
 nodes = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
 edges = ox.graph_to_gdfs(graph, nodes=False)
-overall_length = sum(edges["length"])
 
 print(f'number of edges: {len(edges)}')
-print(f'length of network: {overall_length} meters')
+print(f'length of network: {sum(edges["length"])} meters')
 
 # %% 
 # get rides of all bikes over time
