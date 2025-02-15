@@ -66,42 +66,63 @@ def get_available_bikes_per_date(date):
 
     return (date, unique_bikes)
 
-directory = './scraper/scraping_data/nuernberg/'
 overwrite = False
 
-available_bikes_filename = 'available_bikes_per_day.csv'
 fieldnames = ['date', 'bikes']
 
-available_bikes = {}
+cities = {
+    'nuernberg': {
+        'directory': './scraper/scraping_data/nuernberg/',
+        'available_bikes_filename': 'available_bikes_per_day_nuernberg.csv',
+    },
+    'fuerth': {
+        'directory': './scraper/scraping_data/fuerth/',
+        'available_bikes_filename': 'available_bikes_per_day_fuerth.csv',
+    },
+    'erlangen': {
+        'directory': './scraper/scraping_data/erlangen/',
+        'available_bikes_filename': 'available_bikes_per_day_erlangen.csv',
+    },
+    'schwabach': {
+        'directory': './scraper/scraping_data/schwabach/',
+        'available_bikes_filename': 'available_bikes_per_day_schwabach.csv',
+    }
+}
 
-if os.path.isfile(available_bikes_filename):
-    with open(available_bikes_filename, 'r', newline='') as csvfile:
-        reader = csv.DictReader(csvfile, fieldnames=fieldnames, delimiter=';')
-        # skip header
-        next(reader, None)
+for city, city_data in cities.items():
+    print(f'getting available bikes for {city}')
+    directory = city_data['directory']
+    available_bikes_filename = city_data['available_bikes_filename']
+    available_bikes = {}
 
-        for row in reader:
-            bikes = row['bikes'].split(',')
-            available_bikes[row['date']] = bikes
+    if os.path.isfile(available_bikes_filename):
+        with open(available_bikes_filename, 'r', newline='') as csvfile:
+            reader = csv.DictReader(csvfile, fieldnames=fieldnames, delimiter=';')
+            # skip header
+            next(reader, None)
 
-dates = pd.date_range('2023-05-22', '2025-01-31')
-for date in dates:
-    if overwrite is False and date.date().isoformat() in available_bikes:
-        print(f'bikes for {date.date()} are already there')
-        continue
-    else:
-        result = get_available_bikes_per_date(date)
-        if result is not None:
-            _, bikes = result
-            available_bikes[date.date().isoformat()] = list(bikes)
+            for row in reader:
+                bikes = row['bikes'].split(',')
+                available_bikes[row['date']] = bikes
 
-with open(available_bikes_filename, 'w', newline='') as csvfile:
-    writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
-    writer.writeheader()
-    sorted_bikes = dict(sorted(available_bikes.items()))
-    writer.writerows([
-        {'date': date, 'bikes': ','.join(unique_bikes)} for date, unique_bikes in available_bikes.items()
-    ])
+    dates = pd.date_range('2023-05-22', '2025-01-31')
+    for date in dates:
+        if overwrite is False and date.date().isoformat() in available_bikes:
+            print(f'bikes for {date.date()} are already there')
+            continue
+        else:
+            result = get_available_bikes_per_date(date)
+            if result is not None:
+                _, bikes = result
+                available_bikes[date.date().isoformat()] = list(bikes)
+
+    with open(available_bikes_filename, 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
+        writer.writeheader()
+        sorted_bikes = dict(sorted(available_bikes.items()))
+        writer.writerows([
+            {'date': date, 'bikes': ','.join(unique_bikes)} for date, unique_bikes in available_bikes.items()
+        ])
 
 # %%
 # read csv of available bikes
@@ -117,58 +138,77 @@ def get_unique_bikes_in_date_range(dict, date_start, date_end):
             
     return unique_bikes
 
-with open(available_bikes_filename, 'r', newline='') as csvfile:
-    fieldnames = ['date', 'bikes']
-    reader = csv.DictReader(csvfile, fieldnames=fieldnames, delimiter=';')
-    # skip header
-    next(reader, None)
+for city, city_data in cities.items():
+    available_bikes_filename = city_data['available_bikes_filename']
 
-    available_bikes = {}
-    for row in reader:
-        bikes = row['bikes'].split(',')
-        available_bikes[row['date']] = bikes
+    with open(available_bikes_filename, 'r', newline='') as csvfile:
+        fieldnames = ['date', 'bikes']
+        reader = csv.DictReader(csvfile, fieldnames=fieldnames, delimiter=';')
+        # skip header
+        next(reader, None)
+
+        available_bikes = {}
+        for row in reader:
+            bikes = row['bikes'].split(',')
+            available_bikes[row['date']] = bikes
+
+    cities[city]['available_bikes'] = available_bikes
 
 # %%
 # plot monthly available bikes
-monthly_available_bikes = {}
-for month_start, month_end in zip(pd.date_range('2023-01', '2025-02', freq='MS'), pd.date_range('2023-01', '2025-02', freq='M')):
-    monthly_available_bikes[f'{month_start.year} {month_start.date().strftime("%B")}'] = get_unique_bikes_in_date_range(available_bikes, month_start, month_end)
+for city, city_data in cities.items():
+    available_bikes = city_data['available_bikes']
+    monthly_available_bikes = {}
+    for month_start, month_end in zip(pd.date_range('2023-01', '2025-02', freq='MS'), pd.date_range('2023-01', '2025-02', freq='M')):
+        monthly_available_bikes[f'{month_start.year} {month_start.date().strftime("%B")}'] = get_unique_bikes_in_date_range(available_bikes, month_start, month_end)
 
-monthly_available_bikes = dict((k, v) for k, v in monthly_available_bikes.items() if len(v) > 0)
+    monthly_available_bikes = dict((k, v) for k, v in monthly_available_bikes.items() if len(v) > 0)
 
-for k, v in monthly_available_bikes.items():
-    print(f'average available bikes in {k}: {np.mean(v)}')
-    print(f'median available bikes in {k}: {np.median(v)}')
+    for k, v in monthly_available_bikes.items():
+        print(f'average available bikes in {k}: {np.mean(v)}')
+        print(f'median available bikes in {k}: {np.median(v)}')
 
-fig, ax = plt.subplots()
-ax.boxplot(monthly_available_bikes.values())
-ax.set_xticklabels(monthly_available_bikes.keys())
-plt.xticks(rotation=45)
-fig.set_size_inches(25, 10, forward=True)
-fig.set_dpi(100)
-plt.grid()
-plt.show()
+    fig, ax = plt.subplots()
+    ax.boxplot(monthly_available_bikes.values())
+    ax.set_xticklabels(monthly_available_bikes.keys())
+    plt.xticks(rotation=45)
+    fig.set_size_inches(25, 10, forward=True)
+    fig.set_dpi(100)
+    plt.grid()
+    plt.show()
+
 # %%
 # plot number of daily available bikes
-x_data = []
-y_data = []
-for date in pd.date_range('2023-01', '2025-02', freq='D'):
-    x_data.append(date.date().isoformat())
-    b = available_bikes.get(date.date().isoformat(), None)
-    if b is None:
-        y_data.append(None)
-    else:
-        y_data.append(len(b))
-
 fig, ax = plt.subplots(1)
-plt.plot(x_data, y_data)
+
+x_data = [date.date().isoformat() for date in pd.date_range('2023-01', '2025-02', freq='D')]
+y_max = 0
+
+for city, city_data in cities.items():
+    available_bikes = city_data['available_bikes']
+    
+    y_data = []
+    for date in x_data:
+        b = available_bikes.get(date, None)
+        if b is None:
+            y_data.append(None)
+        else:
+            y_data.append(len(b))
+
+    plt.plot(x_data, y_data, label=city)
+    print(f'average available bikes in {city}: {y_data}')
+    max_temp = max([x for x in y_data if x is not None])
+    if(max_temp > y_max):
+        y_max = max_temp
+
 plt.xticks(rotation=45)
-ax.set_ylim(ymin=0, ymax=max([x for x in y_data if x is not None]) + 200)
+ax.set_ylim(ymin=0, ymax=y_max + 200)
 ax.xaxis.set_major_locator(MonthLocator(interval=1))
 #ax.xaxis.set_minor_locator(WeekdayLocator())
 fig.set_size_inches(25, 10, forward=True)
 fig.set_dpi(100)
 fig.tight_layout()
+fig.legend()
 plt.grid()
 plt.show()
 
