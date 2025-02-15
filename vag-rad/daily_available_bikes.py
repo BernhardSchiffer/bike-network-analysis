@@ -194,10 +194,10 @@ for city, city_data in cities.items():
             y_data.append(None)
         else:
             y_data.append(len(b))
-
+    
     plt.plot(x_data, y_data, label=city)
-    print(f'average available bikes in {city}: {y_data}')
-    max_temp = max([x for x in y_data if x is not None])
+
+    max_temp = max([x for x in y_data if x is not None], default=0)
     if(max_temp > y_max):
         y_max = max_temp
 
@@ -214,9 +214,11 @@ plt.show()
 
 # %%
 # look for dates with outliers
-for k, v in available_bikes.items():
-    if len(v) < 100:
-        print(f'{k}: available bikes {len(v)}')
+for city, city_data in cities.items():
+    available_bikes = city_data['available_bikes']
+    for k, v in available_bikes.items():
+        if len(v) < 100:
+            print(f'{city} {k}: available bikes {len(v)}')
 
 # %%
 # remove dates with falsy data
