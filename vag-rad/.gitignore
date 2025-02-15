@@ -7,4 +7,5 @@ cache/
 dump/*.dat*
 __pycache__
 *.html
+*.graphml
 *.png

@@ -5,7 +5,6 @@ import networkx as nx
 import pandas as pd
 import os
 import folium
-import time
 import osmium
 import math
 from utils.polygon_filter import PolygonFilter
@@ -14,9 +13,7 @@ import pickle
 import leafmap.foliumap as leafmap
 from pyproj import Transformer
 from shapely.geometry import LineString
-import matplotlib.pyplot as plt
-import matplotlib
-import igraph as ig
+from tqdm import tqdm
 
 osm_to_geotiff = Transformer.from_crs("EPSG:4326", "EPSG:25832")
 geotiff_to_osm = Transformer.from_crs("EPSG:25832", "EPSG:4326")
@@ -32,12 +29,12 @@ def get_elevation(lon, lat):
     return dat.xy(*idx), z[idx]
 
 # %%
-# load calculated routes from file
+# load osm edge attributes from file
 edge_lookup_filename = 'osm_edges_with_attributes.pickle'
 
 if os.path.isfile(edge_lookup_filename):
     with open(edge_lookup_filename, 'rb') as f:
-        edges_osmdata_lookup = pickle.load(f)
+        edges_osm_data_lookup = pickle.load(f)
 else:
     # create lookup table for all edges in nuernberg with all their osm features
     place = ox.geocode_to_gdf('Nürnberg')
@@ -53,11 +50,11 @@ else:
         obj['tags'] = tags
         edges_in_nbg.append(obj)
 
-    edges_osmdata_lookup = pd.DataFrame(edges_in_nbg).set_index('osmid')
+    edges_osm_data_lookup = pd.DataFrame(edges_in_nbg).set_index('osmid')
 
-    # write calculated routes on file
+    # write osm edge attributes to file
     file = open(edge_lookup_filename, 'wb')
-    pickle.dump(edges_osmdata_lookup, file)
+    pickle.dump(edges_osm_data_lookup, file)
     file.close()
 
 # %%
@@ -132,7 +129,7 @@ def split_nodes(graph: nx.DiGraph) -> nx.DiGraph:
         old_edge_keys[u, v] = {'old_edge_key': (u, v)}
     nx.set_edge_attributes(graph, old_edge_keys)
 
-    for node_id, node_data in [x for x in graph.nodes(data=True)]:
+    for node_id, node_data in tqdm([x for x in graph.nodes(data=True)], desc='splitting crossing nodes', total=len(graph.nodes), unit='nodes'):
         in_edges = graph.in_edges(node_id, data=True)
         out_edges = graph.out_edges(node_id, data=True)
 
@@ -192,7 +189,7 @@ def is_tag_available(attribute: str, value: str, tags: dict[str, str]) -> bool:
         return False
     else:
         return tags[attribute] == value
-# %%
+
 def get_slope_penalty(slope: float) -> float:
     if slope < 2:
         return 1.0
@@ -305,11 +302,10 @@ benefit_lookup = [
     residential_road
 ]
 
-
 def get_weight(u, v, data) -> float:
     try:
         osmid = data['osmid']
-        tags = edges_osmdata_lookup.loc[osmid, 'tags']
+        tags = edges_osm_data_lookup.loc[osmid, 'tags']
     except:
         raise ValueError(f'could not find edge with osmid {osmid}')
     
@@ -336,14 +332,10 @@ def get_weight(u, v, data) -> float:
         return math.prod(penalties)
 
 # %%
-# use specific overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2024-11-30T00:00:00Z"]{maxsize}'
-# %% 
-# use default overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}]{maxsize}'
-# %%
 # fetch graph of all streets available by bike
 place_name = 'Nürnberg'
+# use specific overpass settings
+ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2024-11-30T00:00:00Z"]{maxsize}'
 
 graph = ox.graph_from_place(query=place_name, simplify=False, retain_all=True, network_type='bike')
 #graph = ox.graph_from_bbox((11.112403,49.454498,11.112832,49.454774), network_type='bike', simplify=False, retain_all=True, truncate_by_edge=True)
@@ -353,26 +345,26 @@ edge_lookup = ox.graph_to_gdfs(graph, nodes=False, edges=True)
 
 graph = nx.DiGraph(graph)
 #%%
-print('edges:', len(graph.edges))
-#for edge in graph.edges(data=True):
-#    print(edge)
-
-print('nodes:', len(graph.nodes))
-#for node in graph.nodes(data=True):
-#    print(node)
-#%%
+# set node and edge attributes
 graph = set_node_attributes(graph)
 graph = set_node_elevation(graph)
 graph = set_edge_slope(graph)
+
+print('stats of graph before splitting crossing nodes:')
+print('number of edges:', len(graph.edges))
+print('number of nodes:', len(graph.nodes))
+
 graph = split_nodes(graph)
+
+print('stats of graph after splitting crossing nodes:')
+print('number of edges:', len(graph.edges))
+print('number of nodes:', len(graph.nodes))
 
 #%%
 # calculate edge weights according to their osm features
-print(f'starting to calculate edges weights')
-start = time.time()
 weights: dict[tuple[int, int], dict[str, float]] = {}
 problematic_osmids = []
-for u, v, data in graph.edges(data=True):
+for u, v, data in tqdm(graph.edges(data=True), desc='calculating edge weights', total=len(graph.edges), unit='edges'):
     if 'osmid' not in data.keys():
         weights[u,v] = {'weight': data['length']}
         continue
@@ -383,49 +375,15 @@ for u, v, data in graph.edges(data=True):
     except:
         problematic_osmids.append(data['osmid'])
 
-end = time.time()
-print(f'successfully calculated weight of {len(weights)} edges in {end - start} seconds')
-
 if len(problematic_osmids) > 0:
     print(f'found problems with {len(problematic_osmids)} edges')
-    get_list_of_edges(problematic_osmids, edges_osmdata_lookup).explore()
+    get_list_of_edges(problematic_osmids, edges_osm_data_lookup).explore()
 
-# %%
 # add weight attribute to graph
 nx.set_edge_attributes(graph, weights)
 
-#%% 
-print('edges:', len(graph.edges))
-#for edge in graph.edges(data=True):
-#    print(edge)
-
-print('nodes:', len(graph.nodes))
-#for node in graph.nodes(data=True):
-#    print(node)
 # %%
-debug_plot(graph).save('debug.html')
+# save graph to file
+ox.io.save_graphml(nx.MultiDiGraph(graph), filepath='weighted_bicycle_graph.graphml')
 
-# %%
-wg: ig.Graph = ig.Graph.from_networkx(graph)
-
-# %%
-ebc = wg.edge_betweenness(directed = False, cutoff = 4500, weights = "weight")
-
-# %%
-nodes = ox.graph_to_gdfs(nx.MultiDiGraph(graph), nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
-cmap = plt.get_cmap('turbo')
-map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
-
-max_value = max(ebc)
-
-for edge, count in zip(graph.edges(), ebc):
-    positions = []
-    for node_id in edge:
-        node = graph.nodes[node_id]
-        positions.append((node['y'], node['x']))
-    color = matplotlib.colors.to_hex(cmap(count/max_value))
-    folium.PolyLine(positions, color=color, tooltip=count).add_to(map)
-
-map.add_colormap(position=(55,3), width=4.0, height=0.3, vmin=0, vmax=max_value, cmap='turbo')
-map.save('ebc_complex_weighted.html')
 # %%
