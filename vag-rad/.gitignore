@@ -9,3 +9,4 @@ __pycache__
 *.html
 *.graphml
 *.png
+scraper/download_all.sh
