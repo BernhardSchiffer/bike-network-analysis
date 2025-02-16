@@ -105,7 +105,7 @@ for city, city_data in cities.items():
                 bikes = row['bikes'].split(',')
                 available_bikes[row['date']] = bikes
 
-    dates = pd.date_range('2023-05-22', '2025-01-31')
+    dates = pd.date_range('2023-05-22', '2025-02-28')
     for date in dates:
         if overwrite is False and date.date().isoformat() in available_bikes:
             print(f'bikes for {date.date()} are already there')
@@ -159,7 +159,7 @@ for city, city_data in cities.items():
 for city, city_data in cities.items():
     available_bikes = city_data['available_bikes']
     monthly_available_bikes = {}
-    for month_start, month_end in zip(pd.date_range('2023-01', '2025-02', freq='MS'), pd.date_range('2023-01', '2025-02', freq='M')):
+    for month_start, month_end in zip(pd.date_range('2023-01', '2025-03', freq='MS'), pd.date_range('2023-01', '2025-03', freq='M')):
         monthly_available_bikes[f'{month_start.year} {month_start.date().strftime("%B")}'] = get_unique_bikes_in_date_range(available_bikes, month_start, month_end)
 
     monthly_available_bikes = dict((k, v) for k, v in monthly_available_bikes.items() if len(v) > 0)
@@ -181,7 +181,7 @@ for city, city_data in cities.items():
 # plot number of daily available bikes
 fig, ax = plt.subplots(1)
 
-x_data = [date.date().isoformat() for date in pd.date_range('2023-01', '2025-02', freq='D')]
+x_data = [date.date().isoformat() for date in pd.date_range('2023-01', '2025-03', freq='D')]
 y_max = 0
 
 for city, city_data in cities.items():
