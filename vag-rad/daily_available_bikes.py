@@ -73,19 +73,27 @@ fieldnames = ['date', 'bikes']
 cities = {
     'Nürnberg': {
         'directory': './scraper/scraping_data/nuernberg/',
-        'available_bikes_filename': 'available_bikes_per_day_nuernberg.csv',
+        'available_bikes_filename': './stats/available_bikes_per_day_nuernberg.csv',
+        'monthly_stats_filename': './stats/monthly_stats_nuernberg.csv',
+        'daily_stats_filename': './stats/daily_stats_nuernberg.csv'
     },
     'Fürth': {
         'directory': './scraper/scraping_data/fuerth/',
-        'available_bikes_filename': 'available_bikes_per_day_fuerth.csv',
+        'available_bikes_filename': './stats/available_bikes_per_day_fuerth.csv',
+        'monthly_stats_filename': './stats/monthly_stats_fuerth.csv',
+        'daily_stats_filename': './stats/daily_stats_fuerth.csv'
     },
     'Erlangen': {
         'directory': './scraper/scraping_data/erlangen/',
-        'available_bikes_filename': 'available_bikes_per_day_erlangen.csv',
+        'available_bikes_filename': './stats/available_bikes_per_day_erlangen.csv',
+        'monthly_stats_filename': './stats/monthly_stats_erlangen.csv',
+        'daily_stats_filename': './stats/daily_stats_erlangen.csv'
     },
     'Schwabach': {
         'directory': './scraper/scraping_data/schwabach/',
-        'available_bikes_filename': 'available_bikes_per_day_schwabach.csv',
+        'available_bikes_filename': './stats/available_bikes_per_day_schwabach.csv',
+        'monthly_stats_filename': './stats/monthly_stats_schwabach.csv',
+        'daily_stats_filename': './stats/daily_stats_schwabach.csv'
     }
 }
 
@@ -165,9 +173,21 @@ for city, city_data in cities.items():
 
     monthly_available_bikes = dict((k, v) for k, v in monthly_available_bikes.items() if len(v) > 0)
 
+    monthly_stats: dict[str, dict[str, float]] = {}
     for k, v in monthly_available_bikes.items():
-        print(f'average available bikes in {k}: {np.mean(v)}')
-        print(f'median available bikes in {k}: {np.median(v)}')
+        monthly_stats[k] = {}
+        monthly_stats[k]['median_number_of_available_bikes'] = np.median(v)
+        monthly_stats[k]['mean_number_of_available_bikes'] = np.mean(v)
+        monthly_stats[k]['max_number_of_available_bikes'] = np.max(v)
+        monthly_stats[k]['min_number_of_available_bikes'] = np.min(v)
+
+    monthly_stats_filename = city_data['monthly_stats_filename']
+    with open(monthly_stats_filename, 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=['date','median_number_of_available_bikes', 'mean_number_of_available_bikes', 'max_number_of_available_bikes', 'min_number_of_available_bikes'], delimiter=';')
+        writer.writeheader()
+        writer.writerows([
+            {'date': date} | stats for date, stats in monthly_stats.items()
+        ])
 
     fig, ax = plt.subplots()
     ax.boxplot(monthly_available_bikes.values())
@@ -201,6 +221,14 @@ for city, city_data in cities.items():
     
     plt.plot(x_data, y_data, label=city)
 
+    daily_stats_filename = city_data['daily_stats_filename']
+    with open(daily_stats_filename, 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=['date','number_of_available_bikes'], delimiter=';')
+        writer.writeheader()
+        writer.writerows([
+            {'date': date, 'number_of_available_bikes': bikes} for date, bikes in zip(x_data, y_data) if bikes is not None
+        ])
+
     max_temp = max([x for x in y_data if x is not None], default=0)
     if(max_temp > y_max):
         y_max = max_temp
@@ -210,10 +238,11 @@ ax.set_ylim(ymin=0, ymax=y_max + 200)
 ax.xaxis.set_major_locator(MonthLocator(interval=1))
 #ax.xaxis.set_minor_locator(WeekdayLocator())
 plt.xlabel('Date')
+plt.ylabel('Number of available bikes')
 fig.set_size_inches(25, 10, forward=True)
 fig.set_dpi(100)
 fig.tight_layout()
-fig.legend()
+#fig.legend()
 plt.title('Daily available bikes')
 plt.grid()
 plt.show()
@@ -266,5 +295,28 @@ for city, compromised_days in list_of_compromised_days.items():
         writer.writerows([
             {'date': date, 'bikes': ','.join(unique_bikes)} for date, unique_bikes in available_bikes.items()
         ])
+
+# %%
+# merge monthly and daily stats for every city into one xlsx file
+cities_stats = {}
+# Reading the csv file
+for city, city_data in cities.items():
+    daily_stats_filename = city_data['daily_stats_filename']
+    monthly_stats_filename = city_data['monthly_stats_filename']
+
+    daily_stats = pd.read_csv(daily_stats_filename, delimiter=';')
+    monthly_stats = pd.read_csv(monthly_stats_filename, delimiter=';')
+
+    cities_stats[city] = {}
+    cities_stats[city]['daily_stats'] = daily_stats
+    cities_stats[city]['monthly_stats'] = monthly_stats
+
+# saving xlsx file
+with pd.ExcelWriter('vag-rad_stats.xlsx', mode='w') as writer:
+    for city, city_data in cities_stats.items():
+        daily_stats = city_data['daily_stats']
+        monthly_stats = city_data['monthly_stats']
+        daily_stats.to_excel(writer, sheet_name=f'{city} - daily stats', index=False)
+        monthly_stats.to_excel(writer, sheet_name=f'{city} - monthly stats', index=False)
 
 # %%
