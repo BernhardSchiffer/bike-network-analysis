@@ -66,9 +66,17 @@ def get_available_bikes_per_date(date, directory):
 
     return (date, unique_bikes)
 
-overwrite = False
+def get_unique_bikes_in_date_range(dict, date_start, date_end):
+    unique_bikes = []
 
-fieldnames = ['date', 'bikes']
+    dates = pd.date_range(date_start, date_end)
+    for date in dates:
+        try:
+            unique_bikes.append(len(dict[date.date().isoformat()]))
+        except:
+            pass
+            
+    return unique_bikes
 
 cities = {
     'Nürnberg': {
@@ -96,6 +104,11 @@ cities = {
         'daily_stats_filename': './stats/daily_stats_schwabach.csv'
     }
 }
+
+# %%
+# get available bikes per day and write it to file
+overwrite = False
+fieldnames = ['date', 'bikes']
 
 for city, city_data in cities.items():
     print(f'getting available bikes for {city}')
@@ -134,18 +147,6 @@ for city, city_data in cities.items():
 
 # %%
 # read csv of available bikes
-def get_unique_bikes_in_date_range(dict, date_start, date_end):
-    unique_bikes = []
-
-    dates = pd.date_range(date_start, date_end)
-    for date in dates:
-        try:
-            unique_bikes.append(len(dict[date.date().isoformat()]))
-        except:
-            pass
-            
-    return unique_bikes
-
 for city, city_data in cities.items():
     available_bikes_filename = city_data['available_bikes_filename']
 
