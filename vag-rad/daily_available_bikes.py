@@ -12,8 +12,8 @@ from utils.utils import get_files_in_daterange, extract_archive_to_dir, handler
 # %%
 # get unique bikes per day
 def get_bikes_from_file(filename):
-    #print(f"get bikes from: {filename}")
-    f = open(f"{filename}", "r")
+    #print(f'get bikes from: {filename}')
+    f = open(f'{filename}', 'r')
     try:
         data = json.load(f)
     except json.JSONDecodeError as e:
@@ -40,7 +40,7 @@ def get_bikes_from_file(filename):
     return bike_records
 
 def get_available_bikes_per_date(date, directory):
-    print(f'getting bikes for {date.date()}')
+    #print(f'getting bikes for {date.date()}')
     path = f'{directory}{date.date()}'
     date_string = str(date.date())
     file = get_files_in_daterange(directory, date_start=date_string, date_end=date_string)
@@ -71,19 +71,19 @@ overwrite = False
 fieldnames = ['date', 'bikes']
 
 cities = {
-    'nuernberg': {
+    'Nürnberg': {
         'directory': './scraper/scraping_data/nuernberg/',
         'available_bikes_filename': 'available_bikes_per_day_nuernberg.csv',
     },
-    'fuerth': {
+    'Fürth': {
         'directory': './scraper/scraping_data/fuerth/',
         'available_bikes_filename': 'available_bikes_per_day_fuerth.csv',
     },
-    'erlangen': {
+    'Erlangen': {
         'directory': './scraper/scraping_data/erlangen/',
         'available_bikes_filename': 'available_bikes_per_day_erlangen.csv',
     },
-    'schwabach': {
+    'Schwabach': {
         'directory': './scraper/scraping_data/schwabach/',
         'available_bikes_filename': 'available_bikes_per_day_schwabach.csv',
     }
@@ -121,7 +121,7 @@ for city, city_data in cities.items():
         writer.writeheader()
         sorted_bikes = dict(sorted(available_bikes.items()))
         writer.writerows([
-            {'date': date, 'bikes': ','.join(unique_bikes)} for date, unique_bikes in available_bikes.items()
+            {'date': date, 'bikes': ','.join(unique_bikes)} for date, unique_bikes in sorted_bikes.items()
         ])
 
 # %%
@@ -149,8 +149,9 @@ for city, city_data in cities.items():
 
         available_bikes = {}
         for row in reader:
-            bikes = row['bikes'].split(',')
-            available_bikes[row['date']] = bikes
+            if(len(row['bikes']) > 0):
+                bikes = row['bikes'].split(',')
+                available_bikes[row['date']] = bikes
 
     cities[city]['available_bikes'] = available_bikes
 
@@ -160,7 +161,7 @@ for city, city_data in cities.items():
     available_bikes = city_data['available_bikes']
     monthly_available_bikes = {}
     for month_start, month_end in zip(pd.date_range('2023-01', '2025-03', freq='MS'), pd.date_range('2023-01', '2025-03', freq='M')):
-        monthly_available_bikes[f'{month_start.year} {month_start.date().strftime("%B")}'] = get_unique_bikes_in_date_range(available_bikes, month_start, month_end)
+        monthly_available_bikes[f'{month_start.year} {month_start.date().strftime('%B')}'] = get_unique_bikes_in_date_range(available_bikes, month_start, month_end)
 
     monthly_available_bikes = dict((k, v) for k, v in monthly_available_bikes.items() if len(v) > 0)
 
@@ -172,8 +173,11 @@ for city, city_data in cities.items():
     ax.boxplot(monthly_available_bikes.values())
     ax.set_xticklabels(monthly_available_bikes.keys())
     plt.xticks(rotation=45)
+    plt.xlabel('Month')
+    plt.ylabel('Number of available bikes')
     fig.set_size_inches(25, 10, forward=True)
     fig.set_dpi(100)
+    plt.title(f'{city} - Monthly available bikes')
     plt.grid()
     plt.show()
 
@@ -205,10 +209,12 @@ plt.xticks(rotation=45)
 ax.set_ylim(ymin=0, ymax=y_max + 200)
 ax.xaxis.set_major_locator(MonthLocator(interval=1))
 #ax.xaxis.set_minor_locator(WeekdayLocator())
+plt.xlabel('Date')
 fig.set_size_inches(25, 10, forward=True)
 fig.set_dpi(100)
 fig.tight_layout()
 fig.legend()
+plt.title('Daily available bikes')
 plt.grid()
 plt.show()
 
@@ -222,38 +228,43 @@ for city, city_data in cities.items():
 
 # %%
 # remove dates with falsy data
-available_bikes_filename = 'available_bikes_per_day_nuernberg.csv'
 fieldnames = ['date', 'bikes']
-available_bikes = {}
 
-with open(available_bikes_filename, 'r', newline='') as csvfile:
-    reader = csv.DictReader(csvfile, fieldnames=fieldnames, delimiter=';')
-    # skip header
-    next(reader, None)
+list_of_compromised_days = {
+    'Nürnberg': [
+        '2024-02-18',
+        '2024-06-08',
+        '2024-08-09',
+        '2024-09-07',
+        '2024-09-08',
+        '2024-11-16'
+    ]
+}
 
-    for row in reader:
-        bikes = row['bikes'].split(',')
-        available_bikes[row['date']] = bikes
+for city, compromised_days in list_of_compromised_days.items():
+    available_bikes_filename = cities[city]['available_bikes_filename']
+    available_bikes = {}
 
-list_of_compromised_days = [
-    '2024-02-18',
-    '2024-06-08',
-    '2024-08-09',
-    '2024-09-07',
-    '2024-09-08',
-    '2024-11-16'
-]
+    with open(available_bikes_filename, 'r', newline='') as csvfile:
+        reader = csv.DictReader(csvfile, fieldnames=fieldnames, delimiter=';')
+        # skip header
+        next(reader, None)
 
-for k in list_of_compromised_days:
-    print(f'{k}: available bikes {len(available_bikes[k])}')
-    available_bikes.pop(k)
+        for row in reader:
+            bikes = row['bikes'].split(',')
+            available_bikes[row['date']] = bikes
 
-with open(available_bikes_filename, 'w', newline='') as csvfile:
-    fieldnames = ['date', 'bikes']
-    writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
-    writer.writeheader()
-    sorted_bikes = dict(sorted(available_bikes.items()))
-    writer.writerows([
-        {'date': date, 'bikes': ','.join(unique_bikes)} for date, unique_bikes in available_bikes.items()
-    ])
+    for k in compromised_days:
+        print(f'{k}: available bikes {len(available_bikes[k])}')
+        available_bikes.pop(k)
+
+    with open(available_bikes_filename, 'w', newline='') as csvfile:
+        fieldnames = ['date', 'bikes']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
+        writer.writeheader()
+        sorted_bikes = dict(sorted(available_bikes.items()))
+        writer.writerows([
+            {'date': date, 'bikes': ','.join(unique_bikes)} for date, unique_bikes in available_bikes.items()
+        ])
+
 # %%
