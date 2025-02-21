@@ -184,10 +184,10 @@ for city, city_data in cities.items():
 
     monthly_stats_filename = city_data['monthly_stats_filename']
     with open(monthly_stats_filename, 'w', newline='') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=['date','median_number_of_available_bikes', 'mean_number_of_available_bikes', 'max_number_of_available_bikes', 'min_number_of_available_bikes'], delimiter=';')
+        writer = csv.DictWriter(csvfile, fieldnames=['year', 'month', 'median_number_of_available_bikes', 'mean_number_of_available_bikes', 'max_number_of_available_bikes', 'min_number_of_available_bikes'], delimiter=';')
         writer.writeheader()
         writer.writerows([
-            {'date': date} | stats for date, stats in monthly_stats.items()
+            {'year': date.split(' ')[0], 'month': date.split(' ')[1]} | stats for date, stats in monthly_stats.items()
         ])
 
     fig, ax = plt.subplots()
@@ -210,6 +210,9 @@ x_data = [date.date().isoformat() for date in pd.date_range('2023-01', '2025-03'
 y_max = 0
 
 for city, city_data in cities.items():
+    if(city != 'Nürnberg'):
+        continue
+
     available_bikes = city_data['available_bikes']
     
     y_data = []
