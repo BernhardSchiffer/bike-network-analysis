@@ -17,6 +17,7 @@ import pickle
 import numpy as np
 import igraph as ig
 import leafmap.foliumap as leafmap
+from tqdm import tqdm
 
 CPU_COUNT = 16
 
@@ -43,7 +44,7 @@ def plot_routes(routes: list[list[int] | None], graph: nx.MultiDiGraph, with_mar
     return map
 
 # calculate heat map for traveled edges
-def plot_heat_map_of_edges(routes: list[list[int] | None], graph: nx.MultiDiGraph):
+def plot_heat_map_of_edges(routes: list[list[int] | None], graph: nx.MultiDiGraph, expanded: bool = False):
     nodes = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
     cmap = plt.get_cmap('turbo')
     edges_counter = Counter()
@@ -64,6 +65,10 @@ def plot_heat_map_of_edges(routes: list[list[int] | None], graph: nx.MultiDiGrap
         for node_id in edge:
             node = nodes.loc[node_id]
             positions.append((node['y'], node['x']))
+        if not expanded:
+            positions = set(positions)
+            if(len(positions) == 1):
+                continue
         color = matplotlib.colors.to_hex(cmap(count/max_value))
         folium.PolyLine(positions, color=color, tooltip=count).add_to(map)
     
@@ -82,7 +87,7 @@ POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 
 # %% 
 # load weighted graph from file
-graph = ox.io.load_graphml('weighted_graph.graphml')
+graph = ox.io.load_graphml('weighted_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float})
 
 # some statistics of the graph
 nodes = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
@@ -305,6 +310,8 @@ map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857'
 max_value = max(ebc)
 
 for edge, count in zip(graph.edges(), ebc):
+    if('turning_angle' in edge[2]):
+        continue
     positions = []
     for node_id in edge:
         node = nodes.loc[node_id]
@@ -342,23 +349,19 @@ bike_infra_graph = ox.graph_from_place(query=place_name, retain_all=True, simpli
 
 # %%
 # finding gaps between bicycle paths
-print(f'start finding gaps between bike paths on routes')
-start = time.time()
 gaps = []
 not_gap = []
 bike_infra_edges = ox.graph_to_gdfs(bike_infra_graph, edges=True, nodes=False)
-for i, route in enumerate(routes[:100000]):
+for route in tqdm(routes, desc='finding gaps in routes', unit='route'):
     es = ox.routing.route_to_gdf(graph, route, weight='weight')
     for idx, row in es.iterrows():
         if row['osmid'] not in bike_infra_edges['osmid'].values:
             gaps.append(row)
         else:
             not_gap.append(row)
-    if i % 10000 == 0 and i > 0:
-        print(f'calculated gaps in {i} routes, avg. time per route {(time.time() - start)/i} seconds')
 gaps_df = gpd.GeoDataFrame(gaps)
-end = time.time()
-print(f'found {len(gaps)} gaps in {end - start} seconds')
+print(f'{len(gaps)} road segments have no bike infrastructure')
+print(f'{len(not_gap)} road segments have bike infrastructure')
 
 # %%
 def calc_benefits(edges: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -424,3 +427,10 @@ not_gap_df = gpd.GeoDataFrame(not_gap)
 
 # %%
 plot_edge_heatmap(not_gap_df)
+
+# %%
+#filter dataframe for items with osmid not nan
+unique_gaps = gaps_df[gaps_df['osmid'].notna()].drop_duplicates(subset='osmid', keep='first')
+unique_gaps
+
+# %%
