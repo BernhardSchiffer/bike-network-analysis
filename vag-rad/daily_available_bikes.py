@@ -210,8 +210,8 @@ x_data = [date.date().isoformat() for date in pd.date_range('2023-01', '2025-03'
 y_max = 0
 
 for city, city_data in cities.items():
-    if(city != 'Nürnberg'):
-        continue
+    #if(city != 'Nürnberg'):
+    #    continue
 
     available_bikes = city_data['available_bikes']
     

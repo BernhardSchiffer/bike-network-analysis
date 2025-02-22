@@ -14,11 +14,11 @@ import leafmap.foliumap as leafmap
 from pyproj import Transformer
 from shapely.geometry import LineString
 from tqdm import tqdm
+import rasterio
 
 osm_to_geotiff = Transformer.from_crs("EPSG:4326", "EPSG:25832")
 geotiff_to_osm = Transformer.from_crs("EPSG:25832", "EPSG:4326")
 
-import rasterio
 dat = rasterio.open('./DEM/nuernberg.tif')
 # read all the data from the first band
 z = dat.read()[0]
@@ -280,7 +280,6 @@ def is_residential_road(tags: dict[str, str]) -> bool:
     ]
     return any(is_tag_available(k, v, tags) for k, v in residential_road_filter)
 
-# %%
 # define benefits and penalties for edges according to their osm features
 type filter = tuple[list[function], float]
 
@@ -384,6 +383,6 @@ nx.set_edge_attributes(graph, weights)
 
 # %%
 # save graph to file
-ox.io.save_graphml(nx.MultiDiGraph(graph), filepath='weighted_bicycle_graph.graphml')
+ox.io.save_graphml(nx.MultiDiGraph(graph), filepath='small_bicycle_graph.graphml')
 
 # %%
