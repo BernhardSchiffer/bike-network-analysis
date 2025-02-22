@@ -88,6 +88,7 @@ POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 # %% 
 # load weighted graph from file
 graph = ox.io.load_graphml('weighted_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float})
+graph_small = ox.io.load_graphml('small_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float})
 
 # some statistics of the graph
 nodes = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
@@ -148,22 +149,28 @@ print('start calculating nearest nodes')
 start = time.time()
 x = [p.x for p in starting_positions]
 y = [p.y for p in starting_positions]
-starting_node_ids = ox.distance.nearest_nodes(graph, x, y)
+starting_node_ids = ox.distance.nearest_nodes(graph_small, x, y)
 
 x = [p.x for p in finishing_positions]
 y = [p.y for p in finishing_positions]
-finishing_node_ids = ox.distance.nearest_nodes(graph, x, y)
+finishing_node_ids = ox.distance.nearest_nodes(graph_small, x, y)
 end = time.time()
 print(f'finished calculating nearest nodes in {end - start} seconds')
 
 print('start calculating routes')
 start = time.time()
-shortest_routes = ox.routing.shortest_path(graph, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT)
+shortest_routes = ox.routing.shortest_path(graph_small, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT)
 end = time.time()
 print(f'finished calculating routes in {end - start} seconds')
 
 # %%
-plot_heat_map_of_edges(shortest_routes, graph).save('shortest_routes.html')
+# write calculated routes on file
+file = open('calculated_shortest_routes.pickle', 'wb')
+pickle.dump(shortest_routes, file)
+file.close()
+
+# %%
+plot_heat_map_of_edges(shortest_routes, graph_small).save('shortest_routes.html')
 
 # %%
 # calculate trips based on the new weight metric based on osm features
@@ -195,32 +202,36 @@ print(f'finished calculating routes in {end - start} seconds')
 file = open('calculated_routes.pickle', 'wb')
 pickle.dump(routes, file)
 file.close()
-# %%
-# load calculated routes from file
-with open('calculated_routes.pickle', 'rb') as f:
-    routes = pickle.load(f)
 
 # %%
 # plot heatmap of calculated routes
 plot_heat_map_of_edges(routes, graph).save('weighted_routes.html')
 
 # %%
+# load calculated routes from file
+with open('calculated_routes.pickle', 'rb') as f:
+    routes = pickle.load(f)
+
+# load calculated routes from file
+with open('calculated_shortest_routes.pickle', 'rb') as f:
+    shortest_routes = pickle.load(f)
+
+# %%
 # calculate detour factor of routes
 def correct_routes(route: list[int]) -> bool:
     return route != None and len(route) > 1
-
 
 shortest_routes = list(filter(correct_routes, shortest_routes))
 routes = list(filter(correct_routes, routes))
 #%%
 shortest_route_lenghts = []
-for route in shortest_routes:
-    r = ox.routing.route_to_gdf(graph, route)
+for route in tqdm(shortest_routes, desc='calculate length of shortest routes', unit='routes'):
+    r = ox.routing.route_to_gdf(graph_small, route)
     route_length = r['length'].sum()
     shortest_route_lenghts.append(route_length)
 
 weighted_route_lengths = []
-for route in routes:
+for route in tqdm(routes, desc='calculate lenth of weighted routes', unit='routes'):
     r = ox.routing.route_to_gdf(graph, route)
     route_length = r['length'].sum()
     weighted_route_lengths.append(route_length)

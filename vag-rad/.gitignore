@@ -32,4 +32,7 @@ DEM/
 # download script for scraping data
 scraper/download_all.sh
 
+# binary pyton objects i.e. pre calculated routes
+*.pickle
+
 *.png
