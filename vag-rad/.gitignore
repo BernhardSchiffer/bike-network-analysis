@@ -1,12 +1,35 @@
+# virtual environment
 .venv/
+
+# environment files
 .env
+
+# macos system files
 .DS_Store
+
+# folder for all scraped data
 scraping_data/
+
+# logs of scrapers
 logs/
+
+# python cache
 cache/
-dump/*.dat*
 __pycache__
+
+# db dump files
+dump/*.dat*
+
+# interactive maps
 *.html
+
+# computed graph
 *.graphml
-*.png
+
+# folder for elevation data (digital elevation model)
+DEM/
+
+# download script for scraping data
 scraper/download_all.sh
+
+*.png
