@@ -19,7 +19,7 @@ osm_to_geotiff = Transformer.from_crs("EPSG:4326", "EPSG:25832")
 geotiff_to_osm = Transformer.from_crs("EPSG:25832", "EPSG:4326")
 
 import rasterio
-dat = rasterio.open('/Users/bernie/Downloads/DEM/nuernberg.tif')
+dat = rasterio.open('./DEM/nuernberg.tif')
 # read all the data from the first band
 z = dat.read()[0]
 
