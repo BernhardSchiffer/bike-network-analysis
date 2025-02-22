@@ -169,7 +169,7 @@ for city, city_data in cities.items():
 for city, city_data in cities.items():
     available_bikes = city_data['available_bikes']
     monthly_available_bikes = {}
-    for month_start, month_end in zip(pd.date_range('2023-01', '2025-03', freq='MS'), pd.date_range('2023-01', '2025-03', freq='M')):
+    for month_start, month_end in zip(pd.date_range('2023-01', '2025-03', freq='MS'), pd.date_range('2023-01', '2025-03', freq='ME')):
         monthly_available_bikes[f'{month_start.year} {month_start.date().strftime('%B')}'] = get_unique_bikes_in_date_range(available_bikes, month_start, month_end)
 
     monthly_available_bikes = dict((k, v) for k, v in monthly_available_bikes.items() if len(v) > 0)
