@@ -221,17 +221,34 @@ with open('calculated_shortest_routes.pickle', 'rb') as f:
 def correct_routes(route: list[int]) -> bool:
     return route != None and len(route) > 1
 
-shortest_routes = list(filter(correct_routes, shortest_routes))
-routes = list(filter(correct_routes, routes))
+routes = {idx: r for idx, r in enumerate(routes)}
+shortest_routes = {idx: r for idx, r in enumerate(shortest_routes)}
+
+removed_idx = set()
+for idx, r in shortest_routes.items():
+    if(not correct_routes(r)):
+        removed_idx.add(idx)
+
+for idx, r in routes.items():
+    if(not correct_routes(r)):
+        removed_idx.add(idx)
+
+for idx in removed_idx:
+    shortest_routes.pop(idx)
+    routes.pop(idx)
+
+shortest_routes = [r for idx, r in shortest_routes.items()]
+routes = [r for idx, r in routes.items()]
+
 #%%
 shortest_route_lenghts = []
-for route in tqdm(shortest_routes, desc='calculate length of shortest routes', unit='routes'):
+for route in tqdm(shortest_routes[:10000], desc='calculate length of shortest routes', unit='routes'):
     r = ox.routing.route_to_gdf(graph_small, route)
     route_length = r['length'].sum()
     shortest_route_lenghts.append(route_length)
 
 weighted_route_lengths = []
-for route in tqdm(routes, desc='calculate lenth of weighted routes', unit='routes'):
+for route in tqdm(routes[:10000], desc='calculate lenth of weighted routes', unit='routes'):
     r = ox.routing.route_to_gdf(graph, route)
     route_length = r['length'].sum()
     weighted_route_lengths.append(route_length)
@@ -258,7 +275,8 @@ plt.boxplot(detour_factors)
 max_value = max(detour_factors)
 idx_max_value = detour_factors.index(max_value)
 
-plot_routes([shortest_routes[idx_max_value], routes[idx_max_value]], graph, with_markers=True).save('max_detour_factor.html')
+display(plot_routes([routes[idx_max_value]], graph, with_markers=True))#.save('max_detour_factor.html')
+display(plot_routes([shortest_routes[idx_max_value]], graph_small, with_markers=True))#.save('max_detour_factor.html')
 print(max_value)
 
 # %%
