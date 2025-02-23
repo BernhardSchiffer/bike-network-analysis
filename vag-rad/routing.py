@@ -1,4 +1,4 @@
-# %% 
+# %%
 # imports
 import matplotlib.colorbar
 import osmnx as ox
@@ -241,21 +241,21 @@ shortest_routes = [r for idx, r in shortest_routes.items()]
 routes = [r for idx, r in routes.items()]
 
 #%%
-shortest_route_lenghts = []
+shortest_route_lengths = []
 for route in tqdm(shortest_routes[:10000], desc='calculate length of shortest routes', unit='routes'):
     r = ox.routing.route_to_gdf(graph_small, route)
     route_length = r['length'].sum()
-    shortest_route_lenghts.append(route_length)
+    shortest_route_lengths.append(route_length)
 
 weighted_route_lengths = []
-for route in tqdm(routes[:10000], desc='calculate lenth of weighted routes', unit='routes'):
+for route in tqdm(routes[:10000], desc='calculate length of weighted routes', unit='routes'):
     r = ox.routing.route_to_gdf(graph, route)
     route_length = r['length'].sum()
     weighted_route_lengths.append(route_length)
 
 # %%
 detour_factors = []
-for s_length, w_length in zip(shortest_route_lenghts, weighted_route_lengths):
+for s_length, w_length in zip(shortest_route_lengths, weighted_route_lengths):
     detour_factor = w_length / s_length
     detour_factors.append(detour_factor)
 # %%
