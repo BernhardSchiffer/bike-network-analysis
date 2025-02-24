@@ -36,3 +36,4 @@ scraper/download_all.sh
 *.pickle
 
 *.png
+!k-modes_cost_analysis.png

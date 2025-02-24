@@ -18,6 +18,7 @@ from tqdm import tqdm
 from kmodes.kmodes import KModes
 from kmodes.kprototypes import KPrototypes
 import matplotlib.pyplot as plt
+import csv
 
 # %%
 # load osm edge attributes from file
@@ -109,7 +110,7 @@ plt.xlabel('Number of clusters')
 plt.title('Cost of clustering for different number of clusters - k-modes')
 plt.grid()
 plt.show()
-        
+
 # %%
 k_modes_stats = dict(sorted(k_modes_stats.items()))
 plt.plot(k_modes_stats.keys(), k_modes_stats.values())
@@ -141,5 +142,18 @@ plt.xlabel('Number of clusters')
 plt.title('Cost of clustering for different number of clusters - k-prototypes')
 plt.grid()
 plt.show()
+
+# %%
+with open('k-modes_stats.csv', 'w', newline='') as csvfile:
+    fieldnames = ['init_method']
+    fieldnames.extend(list(k_modes_stats['Huang'].keys()))
+    writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
+    writer.writeheader()
+    for init_method, stats in k_modes_stats.items():
+        t = {}
+        t['init_method'] = init_method
+        for num_cluster, cost in stats.items():
+            t[num_cluster] = cost
+        writer.writerows([t])
 
 # %%
