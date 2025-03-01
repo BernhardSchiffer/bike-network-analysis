@@ -121,39 +121,58 @@ plt.grid()
 plt.show()
 
 # %%
-k_modes_stats['Huang'] = k_modes_stats
-# %%
-k_prototypes_stats = {}
-# %%
-range_of_clusters = range(2, 4)
-range_of_clusters = [i for i in range_of_clusters if i not in k_prototypes_stats]
-for num_of_clusters in tqdm(range_of_clusters, desc='Number of clusters'):
-    if(num_of_clusters in k_prototypes_stats):
-        continue
-    kp = KPrototypes(n_clusters=num_of_clusters, init='Cao', n_jobs=4)
-    kp.fit(osm_edges.fillna(''), categorical=[i for i in range(0, len(osm_edges.columns))])
-    k_prototypes_stats[num_of_clusters] = kp.cost_
-    print(f'Number of clusters: {num_of_clusters}, cost: {kp.cost_}')
-# %%
-k_prototypes_stats = dict(sorted(k_prototypes_stats.items()))
-plt.plot(k_prototypes_stats.keys(), k_prototypes_stats.values())
-plt.ylabel('Cost')
-plt.xlabel('Number of clusters')
-plt.title('Cost of clustering for different number of clusters - k-prototypes')
-plt.grid()
-plt.show()
+km_classifier = KModes(n_clusters=10, n_init=100, init='Huang', n_jobs=os.cpu_count()/2, verbose=1)
+km_classifier.fit(osm_edges.fillna(''))
+
+# save the model
+pickle.dump(km_classifier, open('k-modes_classifier/km_classifier_10.pkl', 'wb'))
 
 # %%
-with open('k-modes_stats.csv', 'w', newline='') as csvfile:
-    fieldnames = ['init_method']
-    fieldnames.extend(list(k_modes_stats['Huang'].keys()))
-    writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
-    writer.writeheader()
-    for init_method, stats in k_modes_stats.items():
-        t = {}
-        t['init_method'] = init_method
-        for num_cluster, cost in stats.items():
-            t[num_cluster] = cost
-        writer.writerows([t])
+km_classifier = pickle.load(open('k-modes_classifier/km_classifier_10.pkl', 'rb'))
+osm_edges['cluster_20'] = km_classifier.predict(osm_edges.fillna(''))
 
+# %%
+centroids = pd.DataFrame(km_classifier.cluster_centroids_, columns=osm_edges.columns[:-1])
+with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+    display(centroids.replace('', np.nan).dropna(axis=1, how='all').fillna(''))
+
+# %%
+for cluster in range(20):
+    print(f'Cluster {cluster}')
+    with pd.option_context('display.max_rows', 100, 'display.max_columns', 100):
+        display(osm_edges[osm_edges['cluster_20'] == cluster].replace('', np.nan).dropna(axis=1, how='all').fillna(''))
+# %%
+
+for cluster_num in range(20):
+    cluster = osm_edges[osm_edges['cluster_20'] == cluster_num].replace('', np.nan).dropna(axis=1, how='all').fillna('')
+    print(f'Cluster {cluster_num}: {len(cluster)}')
+    for col in cluster.columns:
+        if(cluster[col].value_counts().idxmax() != ''):
+            print(f'{col}: {cluster[col].value_counts().idxmax()} ({cluster[col].value_counts().values.max()})')
+    print()
+# %%
+def plot_clusters_on_map(graph, osm_edges, color_palette):
+    edges = ox.graph_to_gdfs(graph, nodes=False)
+
+    for cluster_num in osm_edges['cluster_20'].unique():
+        graph_map = folium.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
+        cluster_edges = osm_edges[osm_edges['cluster_20'] == cluster_num]
+
+        # get all edges from edges where osmid is in cluster_edges
+        tmp = edges[edges['osmid'].isin(cluster_edges.index)]
+        for _, edge in tmp.iterrows():
+            edge_nodes = edge['geometry'].coords
+            folium.PolyLine([(edge_nodes[0][1], edge_nodes[0][0]), (edge_nodes[1][1], edge_nodes[1][0])], color='red').add_to(graph_map)
+        cluster = osm_edges[osm_edges['cluster_20'] == cluster_num].replace('', np.nan).dropna(axis=1, how='all').fillna('')
+        print(f'Cluster {cluster_num}: {len(cluster)}')
+        for col in cluster.columns:
+            if(cluster[col].value_counts().idxmax() != ''):
+                print(f'{col}: {cluster[col].value_counts().idxmax()} ({cluster[col].value_counts().values.max()})')
+        display(graph_map)
+
+plot_clusters_on_map(graph, osm_edges, ['red', 'blue', 'green', 'purple', 'orange', 'darkred', 'lightred', 'beige', 'darkblue', 'darkgreen', 'cadetblue', 'darkpurple', 'white', 'pink', 'lightblue'])
+
+# %%
+# remove last collumn
+osm_edges = osm_edges.drop(columns=['cluster_20'])
 # %%
