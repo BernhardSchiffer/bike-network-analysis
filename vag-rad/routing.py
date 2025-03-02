@@ -18,6 +18,7 @@ import numpy as np
 import igraph as ig
 import leafmap.foliumap as leafmap
 from tqdm import tqdm
+import multiprocessing as mp
 
 CPU_COUNT = 16
 
@@ -139,7 +140,7 @@ conn.close()
 
 # %%
 # calculate shortest routes and plot on map
-trips = df.head(1000000)
+trips = df.head(100000)
 print(f'{len(trips)} trips')
 
 starting_positions = trips['starting_position']
@@ -157,12 +158,35 @@ finishing_node_ids = ox.distance.nearest_nodes(graph_small, x, y)
 end = time.time()
 print(f'finished calculating nearest nodes in {end - start} seconds')
 
+# %%
+def distance(a, b):
+    a = graph_small.nodes[a]
+    b = graph_small.nodes[b]
+    return ox.distance.euclidean(a['y'], a['x'], b['y'], b['x'])
+
+def a_star(graph, orig, dest, heuristic, weight):
+    try:
+        return list(nx.astar_path(graph, orig, dest, heuristic=heuristic, weight=weight))
+    except nx.exception.NetworkXNoPath:
+        return None
+
+def shortest_path_a_star(graph: nx.MultiDiGraph, starting_nodes: list, destination_nodes: list, weight: str = 'length', cpus: int = 1):
+    args = ((graph, o, d, distance, weight) for o, d in zip(starting_nodes, destination_nodes))
+    with mp.get_context().Pool(cpus) as pool:
+        paths = pool.starmap_async(a_star, args).get()
+    return paths
+
 print('start calculating routes')
 start = time.time()
-shortest_routes = ox.routing.shortest_path(graph_small, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT)
+shortest_routes = shortest_path_a_star(graph_small, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT)
 end = time.time()
 print(f'finished calculating routes in {end - start} seconds')
 
+# %%
+ox.routing.shortest_path(graph_small, ['2035532015'], ['8574098026'])
+
+# %%
+graph_small.nodes['8574098026']
 # %%
 # write calculated routes on file
 file = open('calculated_shortest_routes.pickle', 'wb')
@@ -242,13 +266,13 @@ routes = [r for idx, r in routes.items()]
 
 #%%
 shortest_route_lengths = []
-for route in tqdm(shortest_routes[:10000], desc='calculate length of shortest routes', unit='routes'):
+for route in tqdm(shortest_routes, desc='calculate length of shortest routes', unit='routes'):
     r = ox.routing.route_to_gdf(graph_small, route)
     route_length = r['length'].sum()
     shortest_route_lengths.append(route_length)
 
 weighted_route_lengths = []
-for route in tqdm(routes[:10000], desc='calculate length of weighted routes', unit='routes'):
+for route in tqdm(routes, desc='calculate length of weighted routes', unit='routes'):
     r = ox.routing.route_to_gdf(graph, route)
     route_length = r['length'].sum()
     weighted_route_lengths.append(route_length)
@@ -454,13 +478,14 @@ def plot_edge_heatmap(edges: gpd.GeoDataFrame):
     plt.scatter(counts, benefits, s=1)
     plt.xlabel("count of rides on this gap")
     plt.ylabel("overall benefit")
+    plt.grid()
     plt.show()
 
     max_benefit = max(edges['benefit'].values)
 
     map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
 
-    for edge_id, data in edges.iterrows():
+    for _, data in edges.iterrows():
         p1, p2 = data['geometry'].coords
         p1 = (p1[1], p1[0])
         p2 = (p2[1], p2[0])
