@@ -18,6 +18,8 @@ import numpy as np
 import igraph as ig
 import leafmap.foliumap as leafmap
 from tqdm import tqdm
+import multiprocessing as mp
+from utils.routing import get_gaps_for_route
 
 CPU_COUNT = 16
 
@@ -380,14 +382,27 @@ bike_infra_graph = ox.graph_from_place(query=place_name, retain_all=True, simpli
 # finding gaps between bicycle paths
 gaps = []
 not_gap = []
+
+tmp_edge_lookup = ox.graph_to_gdfs(graph, nodes=False, edges=True)
 bike_infra_edges = ox.graph_to_gdfs(bike_infra_graph, edges=True, nodes=False)
+
+args = ((route, tmp_edge_lookup, bike_infra_edges) for route in routes[:100])
+with mp.Pool(2) as pool:
+    paths = pool.map(get_gaps_for_route, args)
+
+# %%
+paths
+# %%
 for route in tqdm(routes, desc='finding gaps in routes', unit='route'):
-    es = ox.routing.route_to_gdf(graph, route, weight='weight')
-    for idx, row in es.iterrows():
-        if row['osmid'] not in bike_infra_edges['osmid'].values:
-            gaps.append(row)
+    route_edges = route_to_edge_ids(route)
+    for route_edge in route_edges:
+        edge_df = tmp_edge_lookup.loc[route_edge]
+        if edge_df['osmid'] is np.nan:
+            continue
+        if edge_df['osmid'] not in bike_infra_edges['osmid'].values:
+            gaps.append(edge_df)
         else:
-            not_gap.append(row)
+            not_gap.append(edge_df)
 gaps_df = gpd.GeoDataFrame(gaps)
 print(f'{len(gaps)} road segments have no bike infrastructure')
 print(f'{len(not_gap)} road segments have bike infrastructure')

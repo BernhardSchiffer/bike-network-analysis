@@ -155,7 +155,7 @@ def plot_clusters_on_map(graph, osm_edges, color_palette):
     edges = ox.graph_to_gdfs(graph, nodes=False)
 
     for cluster_num in osm_edges['cluster_20'].unique():
-        graph_map = folium.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
+        graph_map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
         cluster_edges = osm_edges[osm_edges['cluster_20'] == cluster_num]
 
         # get all edges from edges where osmid is in cluster_edges
