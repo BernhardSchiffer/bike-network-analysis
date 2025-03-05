@@ -147,7 +147,7 @@ conn.close()
 
 # %%
 # calculate shortest routes and plot on map
-trips = df.head(100000)
+trips = df.head(1000000)
 print(f'{len(trips)} trips')
 
 starting_positions = trips['starting_position']
@@ -185,15 +185,10 @@ def shortest_path_a_star(graph: nx.MultiDiGraph, starting_nodes: list, destinati
 
 print('start calculating routes')
 start = time.time()
-shortest_routes = shortest_path_a_star(graph_small, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT)
+shortest_routes = ox.routing.shortest_path(graph_small, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT, weight='length')
 end = time.time()
 print(f'finished calculating routes in {end - start} seconds')
 
-# %%
-ox.routing.shortest_path(graph_small, ['2035532015'], ['8574098026'])
-
-# %%
-graph_small.nodes['8574098026']
 # %%
 # write calculated routes on file
 file = open('calculated_shortest_routes.pickle', 'wb')
