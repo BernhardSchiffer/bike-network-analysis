@@ -76,6 +76,13 @@ def plot_heat_map_of_edges(routes: list[list[int] | None], graph: nx.MultiDiGrap
     map.add_colormap(position='bottomright', width=4.0, height=0.3, vmin=0, vmax=max_value, cmap='turbo')
     return map
 
+# convert route to list of edge ids
+def route_to_edge_ids(route: list[str]) -> list[tuple[str, str, int]]:
+    edges = []
+    for idx in range(len(route) - 1):
+        edges.append((route[idx], route[idx + 1], 0))
+    return edges
+
 #%%
 # Setup environment
 load_dotenv()
@@ -241,7 +248,7 @@ with open('calculated_shortest_routes.pickle', 'rb') as f:
     shortest_routes = pickle.load(f)
 
 # %%
-# calculate detour factor of routes
+# filter out routes that are not valid
 def correct_routes(route: list[int]) -> bool:
     return route != None and len(route) > 1
 
@@ -264,20 +271,21 @@ for idx in removed_idx:
 shortest_routes = [r for idx, r in shortest_routes.items()]
 routes = [r for idx, r in routes.items()]
 
-#%%
+# %%
+# calculate length of routes
 shortest_route_lengths = []
 for route in tqdm(shortest_routes, desc='calculate length of shortest routes', unit='routes'):
-    r = ox.routing.route_to_gdf(graph_small, route)
-    route_length = r['length'].sum()
+    r = route_to_edge_ids(route)
+    route_length = sum([graph_small.edges[edge]['length'] for edge in r])
     shortest_route_lengths.append(route_length)
 
 weighted_route_lengths = []
 for route in tqdm(routes, desc='calculate length of weighted routes', unit='routes'):
-    r = ox.routing.route_to_gdf(graph, route)
-    route_length = r['length'].sum()
+    r = route_to_edge_ids(route)
+    route_length = sum([graph.edges[edge]['length'] for edge in r])
     weighted_route_lengths.append(route_length)
 
-# %%
+# calculate detour factor of routes
 detour_factors = []
 for s_length, w_length in zip(shortest_route_lengths, weighted_route_lengths):
     detour_factor = w_length / s_length
@@ -414,12 +422,6 @@ for u, v, data in tqdm(graph.edges(data=True), desc='look if bike infra is prese
 nx.set_edge_attributes(graph, weights)
 # %%
 # finding gaps between bicycle paths
-def route_to_edge_ids(route: list[str]) -> list[tuple[str, str, int]]:
-    edges = []
-    for idx in range(len(route) - 1):
-        edges.append((route[idx], route[idx + 1], 0))
-    return edges
-
 def get_gaps_for_route(route: list[str], graph: nx.MultiDiGraph):
     gaps = []
     not_gaps = []
