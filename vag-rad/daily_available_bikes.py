@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.dates import DayLocator, MonthLocator, WeekdayLocator
 from utils.utils import get_files_in_daterange, extract_archive_to_dir, handler
+import pytz
+import shutil
 
 # %%
 # get unique bikes per day
@@ -322,5 +324,37 @@ with pd.ExcelWriter('vag-rad_stats.xlsx', mode='w') as writer:
         monthly_stats = city_data['monthly_stats']
         daily_stats.to_excel(writer, sheet_name=f'{city} - daily stats', index=False)
         monthly_stats.to_excel(writer, sheet_name=f'{city} - monthly stats', index=False)
+
+# %%
+directory = './scraper/scraping_data/nuernberg/'
+
+for date in pd.date_range('2023-05-22', '2025-03-10'):
+    path = f'{directory}{date.date()}'
+    date_string = str(date.date())
+    file = get_files_in_daterange(directory, date_start=date_string, date_end=date_string)
+    if len(file) <= 0:
+        print(f'file for {date.date()} not found')
+        continue
+    else:
+        extract_archive_to_dir(file[0], path)
+
+    date = date.replace(tzinfo=pytz.utc).astimezone(pytz.timezone('Europe/Berlin')).replace(hour=3, minute=0, second=0, microsecond=0)
+    # get utc time stamp
+    date = date.astimezone(pytz.utc)
+    date_string = date.isoformat()[:14]
+
+    # find file path that matches date_string
+    first_fould_file = None
+    for root, dirs, files in os.walk(path):
+        for file in sorted(files):
+            if date_string in file:
+                first_fould_file = os.path.join(root, file)
+                break
+
+    if first_fould_file is not None:
+        print(f'copying {first_fould_file}')
+        shutil.copy2(first_fould_file, './tmp')
+
+    shutil.rmtree(path, onerror=handler)
 
 # %%
