@@ -37,3 +37,5 @@ scraper/download_all.sh
 
 *.png
 !k-modes_cost_analysis.png
+
+tmp/
