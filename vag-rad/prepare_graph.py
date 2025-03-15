@@ -383,6 +383,6 @@ nx.set_edge_attributes(graph, weights)
 
 # %%
 # save graph to file
-ox.io.save_graphml(nx.MultiDiGraph(graph), filepath='small_bicycle_graph.graphml')
+ox.io.save_graphml(nx.MultiDiGraph(graph), filepath='expanded_bicycle_graph.graphml')
 
 # %%
