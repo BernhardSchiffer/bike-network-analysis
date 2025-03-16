@@ -334,9 +334,18 @@ def get_weight(u, v, data) -> float:
 # fetch graph of all streets available by bike
 place_name = 'Nürnberg'
 # use specific overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2024-11-30T00:00:00Z"]{maxsize}'
+ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-03-15T21:21:30Z"]{maxsize}'
 
-graph = ox.graph_from_place(query=place_name, simplify=False, retain_all=True, network_type='bike')
+bikeable_ways = (
+        '["highway"]["area"!~"yes"]["access"!~"private"]'
+        '["highway"!~"abandoned|bus_guideway|construction|corridor|elevator|escalator|footway|'
+        'motor|no|planned|platform|proposed|raceway|razed|steps"]'
+        '["bicycle"!~"no"]["service"!~"private"]'
+    )
+
+bikeable_areas = '["area"~"yes"]["bicycle"~"yes"]'
+
+graph = ox.graph_from_place(query=place_name, simplify=False, retain_all=True, custom_filter=[bikeable_ways, bikeable_areas])
 #graph = ox.graph_from_bbox((11.112403,49.454498,11.112832,49.454774), network_type='bike', simplify=False, retain_all=True, truncate_by_edge=True)
 
 node_lookup = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
