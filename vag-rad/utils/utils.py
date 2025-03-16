@@ -8,6 +8,7 @@ import os
 import multiprocessing as mp
 from utils.types import *
 import leafmap.foliumap as leafmap
+import typing
 
 # calculate length of edges of a graph
 def get_path_length(graph: nx.MultiGraph | nx.MultiDiGraph) -> float:
@@ -18,7 +19,11 @@ def get_path_length(graph: nx.MultiGraph | nx.MultiDiGraph) -> float:
         return 0
     
 # plot edges of a graph on to a folium map
-def plot_graph(graph: nx.MultiGraph | nx.MultiDiGraph, map=leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857'), color='blue') -> leafmap.Map:
+def plot_graph(
+    graph: nx.MultiGraph | nx.MultiDiGraph, 
+    map=leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857'), 
+    color='blue'
+) -> leafmap.Map:
     if(len(graph.edges) > 0):
         df = ox.graph_to_gdfs(graph, nodes=False)
         for t in df['geometry'].values:
@@ -68,20 +73,26 @@ def handler(func, path, exc_info):
     print("Inside handler")
     print(exc_info)
 
-def a_star(graph, orig, dest, heuristic, weight) -> Route | None:
+def a_star(
+    graph: nx.Graph, 
+    orig: EdgeId, 
+    dest: EdgeId, 
+    heuristic: typing.Callable, 
+    weight: str
+) -> Route | None:
     try:
         return list(nx.astar_path(graph, orig, dest, heuristic=heuristic, weight=weight))
     except nx.exception.NetworkXNoPath:
         return None
 
 def shortest_path_a_star(
-        graph: nx.MultiDiGraph, 
-        starting_nodes: list[NodeId], 
-        destination_nodes: list[NodeId], 
-        heuristic: function, 
-        weight: str = 'length', 
-        cpus: int = 1
-    ) -> list[Route | None]:
+    graph: nx.MultiDiGraph, 
+    starting_nodes: list[NodeId], 
+    destination_nodes: list[NodeId], 
+    heuristic: typing.Callable, 
+    weight: str = 'length', 
+    cpus: int = 1
+) -> list[Route | None]:
     args = ((graph, o, d, heuristic, weight) for o, d in zip(starting_nodes, destination_nodes))
     with mp.get_context().Pool(cpus) as pool:
         paths = pool.starmap_async(a_star, args).get()
