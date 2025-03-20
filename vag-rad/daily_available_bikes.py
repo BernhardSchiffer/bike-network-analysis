@@ -328,7 +328,7 @@ with pd.ExcelWriter('vag-rad_stats.xlsx', mode='w') as writer:
 # %%
 directory = './scraper/scraping_data/nuernberg/'
 
-for date in pd.date_range('2023-05-22', '2025-03-10'):
+for date in pd.date_range('2023-05-22', '2025-03-12'):
     path = f'{directory}{date.date()}'
     date_string = str(date.date())
     file = get_files_in_daterange(directory, date_start=date_string, date_end=date_string)
