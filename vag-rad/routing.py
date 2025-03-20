@@ -13,19 +13,19 @@ import geopandas as gpd
 from collections import Counter
 import time
 from utils.utils import *
+from utils.types import *
 import pickle
 import numpy as np
 import igraph as ig
 import leafmap.foliumap as leafmap
 from tqdm import tqdm
-import multiprocessing as mp
 
 CPU_COUNT = 16
 
 # %%
 # helper functions
 # plot routes on a map
-def plot_routes(routes: list[list[int] | None], graph: nx.MultiDiGraph, with_markers: bool = False):
+def plot_routes(routes: list[Route | None], graph: nx.MultiDiGraph, with_markers: bool = False) -> leafmap.Map:
     nodes = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
     map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
 
@@ -45,7 +45,7 @@ def plot_routes(routes: list[list[int] | None], graph: nx.MultiDiGraph, with_mar
     return map
 
 # calculate heat map for traveled edges
-def plot_heat_map_of_edges(routes: list[list[int] | None], graph: nx.MultiDiGraph, expanded: bool = False):
+def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, expanded: bool = False):
     nodes = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
     cmap = plt.get_cmap('turbo')
     edges_counter = Counter()
@@ -76,13 +76,6 @@ def plot_heat_map_of_edges(routes: list[list[int] | None], graph: nx.MultiDiGrap
     map.add_colormap(position='bottomright', width=4.0, height=0.3, vmin=0, vmax=max_value, cmap='turbo')
     return map
 
-# convert route to list of edge ids
-def route_to_edge_ids(route: list[str]) -> list[tuple[str, str, int]]:
-    edges = []
-    for idx in range(len(route) - 1):
-        edges.append((route[idx], route[idx + 1], 0))
-    return edges
-
 #%%
 # Setup environment
 load_dotenv()
@@ -107,6 +100,12 @@ print(f'length of network: {sum(edges["length"])} meters')
 
 # %% 
 # get rides of all bikes over time
+
+limit = 1000000
+minimal_distance = 150
+max_distance = 20000
+max_duration = 60 * 60
+
 conn = psycopg2.connect(
     host=POSTGRES_HOST,
     database=POSTGRES_DB,
@@ -115,21 +114,21 @@ conn = psycopg2.connect(
     port=POSTGRES_PORT)
 
 sql = f"""select r.* from rides r 
-            where ST_Distance(r.starting_position, r.finishing_position) < 20000
-            and ST_Distance(r.starting_position, r.finishing_position) > 150 
-            and EXTRACT(EPOCH FROM (r.finishing_time - r.starting_time)) <= 60 * 60 
+            where ST_Distance(r.starting_position, r.finishing_position) < {max_distance}
+            and ST_Distance(r.starting_position, r.finishing_position) > {minimal_distance} 
+            and EXTRACT(EPOCH FROM (r.finishing_time - r.starting_time)) <= {max_duration} 
             and r.starting_time::date != '2023-10-10'
             and r.starting_time::date != '2023-10-11'
             order by r.bike_id, r.starting_time
-            limit 1000000;"""
+            limit {limit};"""
 finishing_pos_sql = f"""select r.id, r.finishing_position from rides r
-                        where ST_Distance(r.starting_position, r.finishing_position) < 20000
-                        and ST_Distance(r.starting_position, r.finishing_position) > 150 
-                        and EXTRACT(EPOCH FROM (r.finishing_time - r.starting_time)) <= 60 * 60 
+                        where ST_Distance(r.starting_position, r.finishing_position) < {max_distance}
+                        and ST_Distance(r.starting_position, r.finishing_position) > {minimal_distance} 
+                        and EXTRACT(EPOCH FROM (r.finishing_time - r.starting_time)) <= {max_duration} 
                         and r.starting_time::date != '2023-10-10'
                         and r.starting_time::date != '2023-10-11'
                         order by r.bike_id, r.starting_time
-                        limit 1000000;"""
+                        limit {limit};"""
 
 df = gpd.read_postgis(
     sql, 
@@ -166,22 +165,12 @@ end = time.time()
 print(f'finished calculating nearest nodes in {end - start} seconds')
 
 # %%
+# calculate direct route between starting and finishing nodes
+# the lookup in the graph, i.e. in the a star algorithm, is to much overhead be more efficient than the djikstra algorithm
 def distance(a, b):
     a = graph_small.nodes[a]
     b = graph_small.nodes[b]
     return ox.distance.euclidean(a['y'], a['x'], b['y'], b['x'])
-
-def a_star(graph, orig, dest, heuristic, weight):
-    try:
-        return list(nx.astar_path(graph, orig, dest, heuristic=heuristic, weight=weight))
-    except nx.exception.NetworkXNoPath:
-        return None
-
-def shortest_path_a_star(graph: nx.MultiDiGraph, starting_nodes: list, destination_nodes: list, weight: str = 'length', cpus: int = 1):
-    args = ((graph, o, d, distance, weight) for o, d in zip(starting_nodes, destination_nodes))
-    with mp.get_context().Pool(cpus) as pool:
-        paths = pool.starmap_async(a_star, args).get()
-    return paths
 
 print('start calculating routes')
 start = time.time()
@@ -244,7 +233,7 @@ with open('calculated_shortest_routes.pickle', 'rb') as f:
 
 # %%
 # filter out routes that are not valid
-def correct_routes(route: list[int]) -> bool:
+def correct_routes(route: Route) -> bool:
     return route != None and len(route) > 1
 
 routes = {idx: r for idx, r in enumerate(routes)}
@@ -405,7 +394,7 @@ bike_infra_graph = ox.graph_from_place(query=place_name, retain_all=True, simpli
 
 osmids_with_bike_infra = set(ox.graph_to_gdfs(bike_infra_graph, edges=True, nodes=False)['osmid'].values)
 
-weights: dict[tuple[int, int, int], dict[str, bool]] = {}
+weights: dict[edgeId, dict[str, bool]] = {}
 problematic_osmids = []
 for u, v, data in tqdm(graph.edges(data=True), desc='look if bike infra is present', total=len(graph.edges), unit='edges'):
     try:
@@ -417,9 +406,9 @@ for u, v, data in tqdm(graph.edges(data=True), desc='look if bike infra is prese
 nx.set_edge_attributes(graph, weights)
 # %%
 # finding gaps between bicycle paths
-def get_gaps_for_route(route: list[str], graph: nx.MultiDiGraph):
-    gaps = []
-    not_gaps = []
+def get_gaps_for_route(route: Route, graph: nx.MultiDiGraph):
+    gaps: list[EdgeId] = []
+    not_gaps: list[EdgeId] = []
 
     route_edges = route_to_edge_ids(route)
     for route_edge in route_edges:
@@ -433,8 +422,8 @@ def get_gaps_for_route(route: list[str], graph: nx.MultiDiGraph):
     return (gaps, not_gaps)
 
 #%%
-gaps = []
-not_gaps = []
+gaps: list[EdgeId] = []
+not_gaps: list[EdgeId] = []
 for route in tqdm(routes, desc='finding gaps in routes', unit='route'):
     result = get_gaps_for_route(route, graph)
     gaps.extend(result[0])
@@ -493,7 +482,6 @@ def plot_edge_heatmap(edges: gpd.GeoDataFrame):
     return map
 
 plot_edge_heatmap(edge_benefits).save('gaps_benefit.html')
-
 
 # %%
 plot_edge_heatmap(not_gap_df)
