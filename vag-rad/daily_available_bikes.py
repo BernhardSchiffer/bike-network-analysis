@@ -10,10 +10,11 @@ from matplotlib.dates import DayLocator, MonthLocator, WeekdayLocator
 from utils.utils import get_files_in_daterange, extract_archive_to_dir, handler
 import pytz
 import shutil
+from utils.types import *
 
 # %%
 # get unique bikes per day
-def get_bikes_from_file(filename):
+def get_bikes_from_file(filename: str) -> set[BikeId]:
     #print(f'get bikes from: {filename}')
     f = open(f'{filename}', 'r')
     try:
@@ -22,7 +23,7 @@ def get_bikes_from_file(filename):
         print(f'Exception {e} while parsing {filename}')
         return
     
-    bike_records = set()
+    bike_records: set[BikeId] = set()
 
     try:
         places = data['countries'][0]['cities'][0]['places']
@@ -41,7 +42,7 @@ def get_bikes_from_file(filename):
 
     return bike_records
 
-def get_available_bikes_per_date(date, directory):
+def get_available_bikes_per_date(date: pd.Timestamp, directory) -> tuple[pd.Timestamp, set[BikeId]] | None:
     #print(f'getting bikes for {date.date()}')
     path = f'{directory}{date.date()}'
     date_string = str(date.date())
@@ -52,12 +53,12 @@ def get_available_bikes_per_date(date, directory):
     else:
         extract_archive_to_dir(file[0], path)
 
-    filenames = []
+    filenames: list[str] = []
     for root, dirs, files in os.walk(path):
         for file in files:
             filenames.append(os.path.join(root, file))
 
-    unique_bikes = set()
+    unique_bikes: set[BikeId] = set()
 
     for filename in filenames:
         bikes = get_bikes_from_file(filename)

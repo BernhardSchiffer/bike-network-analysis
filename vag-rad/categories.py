@@ -1,24 +1,19 @@
 # %% 
 # imports
 import osmnx as ox
-import networkx as nx
 import pandas as pd
 import numpy as np
 import os
 import folium
 import osmium
-import math
 from utils.polygon_filter import PolygonFilter
 from utils.utils import *
 import pickle
 import leafmap.foliumap as leafmap
-from pyproj import Transformer
-from shapely.geometry import LineString
 from tqdm import tqdm
 from kmodes.kmodes import KModes
 from kmodes.kprototypes import KPrototypes
 import matplotlib.pyplot as plt
-import csv
 
 # %%
 # load osm edge attributes from file
@@ -128,7 +123,7 @@ km_classifier.fit(osm_edges.fillna(''))
 pickle.dump(km_classifier, open('k-modes_classifier/km_classifier_10.pkl', 'wb'))
 
 # %%
-km_classifier = pickle.load(open('k-modes_classifier/km_classifier_10.pkl', 'rb'))
+km_classifier = pickle.load(open('k-modes_classifier/km_classifier_20.pkl', 'rb'))
 osm_edges['cluster_20'] = km_classifier.predict(osm_edges.fillna(''))
 
 # %%
