@@ -66,11 +66,18 @@ osm_edges = pd.concat(dfs, copy=False)
 # %%
 osm_edges
 # %%
-unique_attributes = pd.DataFrame.from_records([(col, osm_edges[col].nunique()) for col in osm_edges.columns],columns=['Column_Name', 'Num_Unique']).sort_values(by=['Num_Unique'])
+unique_attributes = pd.DataFrame.from_records(
+    [(
+        col, 
+        len(osm_edges[col].dropna(inplace=False)), 
+        len(osm_edges[col].dropna(inplace=False))/len(osm_edges)*100, 
+        osm_edges[col].nunique()
+    ) for col in osm_edges.columns],columns=['Column_Name', 'Num_Values', "Percentage", 'Num_Unique']).sort_values(by=['Num_Values'], ascending=False)
 with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
     print(unique_attributes)
 # %%
-osm_edges.value_counts()
+osm_edges['source'].value_counts()
+    
 # %%
 pd.DataFrame.from_records([(col, osm_edges[col].value_counts()) for col in osm_edges.columns])
 # %%
