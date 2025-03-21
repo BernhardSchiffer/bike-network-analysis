@@ -6,7 +6,7 @@ import osmnx as ox
 import shapely.geos
 from utils.utils import *
 import leafmap.foliumap as leafmap
-from utils.graph import split_nodes
+from utils.graph_builder import split_nodes
 import math
 from pyproj import Geod
 from pyproj import Transformer
