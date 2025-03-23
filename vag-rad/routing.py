@@ -45,10 +45,10 @@ def plot_routes(routes: list[Route | None], graph: nx.MultiDiGraph, with_markers
     return map
 
 # calculate heat map for traveled edges
-edges_counter = Counter()
+#edges_counter = Counter()
 def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, expanded: bool = False) -> GeoDataFrame:
     cmap = plt.get_cmap('turbo')
-    #edges_counter = Counter()
+    edges_counter = Counter()
 
     for route in tqdm(routes, desc='count edges', unit='route'):
         edges = route_to_edge_ids(route)
@@ -121,10 +121,6 @@ def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, e
     columns_to_keep.extend(list(attributes.keys()))
     
     return edges_df#.reset_index(drop=True)
-
-#%%
-print(edges_counter[('(1360463309, 4330493299)', '4330493299', 0)])
-print(edges_counter[('4330493299', '(4330493299, 1360463309)', 0)])
 
 #%%
 k1 = ('(1360463310, (1360463310, 1360463309))', '(1360463310, 1360463309)', 0)

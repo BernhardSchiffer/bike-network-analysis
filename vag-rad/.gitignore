@@ -41,4 +41,4 @@ scraper/download_all.sh
 tmp/
 
 # geopackages
-*.gpkg
+*.gpkg*
