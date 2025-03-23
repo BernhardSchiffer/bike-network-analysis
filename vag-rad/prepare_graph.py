@@ -5,6 +5,7 @@ import networkx as nx
 import folium
 import leafmap.foliumap as leafmap
 from utils.graph_builder import GraphBuilder, split_nodes
+from utils.utils import shift_graph
 
 # %%
 def debug_plot(graph: nx.DiGraph):
@@ -50,6 +51,7 @@ print('number of edges:', len(graph.edges))
 print('number of nodes:', len(graph.nodes))
 
 graph = split_nodes(graph)
+graph = shift_graph(graph)
 
 print('stats of graph after splitting crossing nodes:')
 print('number of edges:', len(graph.edges))

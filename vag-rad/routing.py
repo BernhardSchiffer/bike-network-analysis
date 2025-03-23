@@ -19,7 +19,6 @@ import numpy as np
 import igraph as ig
 import leafmap.foliumap as leafmap
 from tqdm import tqdm
-import shapely
 
 CPU_COUNT = 1
 
@@ -46,58 +45,164 @@ def plot_routes(routes: list[Route | None], graph: nx.MultiDiGraph, with_markers
     return map
 
 # calculate heat map for traveled edges
-def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, expanded: bool = False):
-    nodes = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
-    edge_df = ox.graph_to_gdfs(graph, nodes=False, edges=True)
+edges_counter = Counter()
+def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, expanded: bool = False) -> GeoDataFrame:
     cmap = plt.get_cmap('turbo')
-    edges_counter = Counter()
+    #edges_counter = Counter()
 
-    for route in routes:
-        if route:
-            start_node = route[0]
-            for node in route[1:]:
-                edges_counter.update([(start_node, node)])
-                start_node = node
+    for route in tqdm(routes, desc='count edges', unit='route'):
+        edges = route_to_edge_ids(route)
+        edges_counter.update(edges)
 
     # collapse edges with same nodes ie. edges with different directions
     if not expanded:
+        print(f'number of edges: {len(edges_counter)}')
         for edge in list(edges_counter.keys()):
-            if edge[::-1] in edges_counter:
-                edges_counter[edge] = edges_counter[edge] + edges_counter[edge[::-1]]
-                edges_counter.pop(edge[::-1])
-
-    map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
+            reversed_edge = get_reversed_key(edge)
+            if reversed_edge in edges_counter:
+                edges_counter[edge] = edges_counter[edge] + edges_counter[reversed_edge]
+                edges_counter.pop(reversed_edge)
+        print(f'number of edges after collapsing: {len(edges_counter)}')
 
     max_value = edges_counter.most_common(1)[0][1]
 
-    for edge, count in edges_counter.items():
+    if expanded:
+        edges_df, _, _ = plot_shifted_graph(graph)
+    else:
+        edges_df = plot_graph(graph)
+
+    to_remove_edges = []
+    attributes = {
+        'count': [], 
+        'color': [], 
+        'osmid': [], 
+        'weight': [], 
+        'length': [], 
+        'penalty': [],
+        'slope': []
+    }
+    for idx, data in tqdm(edges_df.iterrows(), desc='add count to edges', unit='edge', total=len(edges_df)):
         try:
-            if(edge_df.loc[edge]['turning_angle'].values[0] is not np.nan):
+            count = edges_counter[idx]
+            if count == 0:
+                to_remove_edges.append(idx)
                 continue
-            linestring = edge_df.loc[edge]['geometry'].values[0]
+            if not expanded:
+                try:
+                    s, d, k = idx
+                    graph.edges[s, d, k]['turning_angle']
+                    to_remove_edges.append((s, d, k))
+                    continue
+                except KeyError:
+                    pass
+            attributes['count'].append(count)
+            color = matplotlib.colors.to_hex(cmap(count/max_value))
+            attributes['color'].append(color)
+            attributes['osmid'].append(graph.edges[idx].get('osmid', None))
+            weight = graph.edges[idx].get('weight', None)
+            attributes['weight'].append(weight)
+            length = graph.edges[idx].get('length', None)
+            attributes['length'].append(length)
+            penalty = graph.edges[idx].get('penalty', None)
+            attributes['penalty'].append(penalty)
+            attributes['slope'].append(graph.edges[idx].get('slope_percentage', None))
         except KeyError:
+            to_remove_edges.append((s, d, k))
             continue
 
-        if expanded:
-            linestring = linestring.parallel_offset(0.00001, side='right')
+    # drop rows
+    edges_df = edges_df.drop(to_remove_edges)
 
-        color = matplotlib.colors.to_hex(cmap(count/max_value))
-        folium.PolyLine([(linestring.coords[0][1], linestring.coords[0][0]), (linestring.coords[1][1], linestring.coords[1][0])], color=color, tooltip=f'count: {count}, length: {graph.edges[edge[0], edge[1], 0]['length']}, weight: {graph.edges[edge[0], edge[1], 0]['weight']}').add_to(map)
+    # add column for count and add the counts list
+    for key, value in attributes.items():
+        edges_df[key] = value
+    # only keep columns that are needed
+    columns_to_keep = ['geometry', 'line_width']
+    columns_to_keep.extend(list(attributes.keys()))
     
-    map.add_colormap(position='bottomright', width=4.0, height=0.3, vmin=0, vmax=max_value, cmap='turbo')
-    return map
-
-plot_heat_map_of_edges(routes, graph, expanded=False)
-
-# %%
-map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
-folium.PolyLine([(49.4787285, 11.1103404), (49.4787285, 11.1103404)], color='red').add_to(map)
-map
-#%%
-ox.graph_to_gdfs(graph, nodes=False, edges=True).loc['12249865', '3808145976', 0]['turning_angle'] is np.nan
+    return edges_df#.reset_index(drop=True)
 
 #%%
-np.nan
+print(edges_counter[('(1360463309, 4330493299)', '4330493299', 0)])
+print(edges_counter[('4330493299', '(4330493299, 1360463309)', 0)])
+
+#%%
+k1 = ('(1360463310, (1360463310, 1360463309))', '(1360463310, 1360463309)', 0)
+
+k2 = ('(1360463309, 1360463310)', '((1360463309, 1360463310), 1360463310)', 0)
+
+# reverse nested tuples
+
+
+def is_tuple(s: str) -> bool:
+    if type(s) != str:
+        return False
+    return s[0] == '(' and s[-1] == ')'
+
+def get_reversed_key(k: EdgeId) -> EdgeId:
+    u, v, k = k
+    #check if string is tuple
+    if is_tuple(u):    
+        u = split_tuple(u[1:-1])
+        if is_tuple(u[0]):
+            u0, u1 = split_tuple(u[0][1:-1])
+            u[0] = (int(u1), int(u0))
+        else:
+            u[0] = int(u[0])
+        if is_tuple(u[1]):
+            u0, u1 = split_tuple(u[1][1:-1])
+            u[1] = (int(u1), int(u0))
+        else:
+            u[1] = int(u[1])
+        u = u[::-1]
+        u = str(tuple(u))
+    if is_tuple(v):
+        v = split_tuple(v[1:-1])
+        if is_tuple(v[0]):
+            v0, v1 = split_tuple(v[0][1:-1])
+            v[0] = (int(v1), int(v0))
+        else:
+            v[0] = int(v[0])
+        if is_tuple(v[1]):
+            v0, v1 = split_tuple(v[1][1:-1])
+            v[1] = (int(v1), int(v0))
+        else:
+            v[1] = int(v[1])
+        v = v[::-1]
+        v = str(tuple(v))
+
+    return (v, u, k)
+
+print(get_reversed_key(k2))
+print(get_reversed_key(k2) == k1)
+#%%
+
+s = '1360463310, (1360463310, 1360463309)'
+
+# split the string only at the comma that is not inside a tuple
+def split_tuple(s: str) -> list[str]:
+    parts = []
+    part = ''
+    inside_tuple = False
+    for c in s:
+        if c == '(':
+            inside_tuple = True
+        elif c == ')':
+            inside_tuple = False
+        if c == ',' and not inside_tuple:
+            parts.append(part)
+            part = ''
+        else:
+            part = part + c
+    parts.append(part)
+
+    # remove leading and trailing whitespaces
+    parts = [p.strip() for p in parts]
+    return parts
+
+split_tuple(s)
+# shift k1 so that it is equal to k2
+
 #%%
 # Setup environment
 load_dotenv()
@@ -241,7 +346,9 @@ file.close()
 
 # %%
 # plot heatmap of calculated routes
-plot_heat_map_of_edges(routes, graph, expanded=True)#.save('weighted_routes.html')
+plot_heat_map_of_edges(routes, graph, expanded=False).to_file(filename='graph.gpkg', layer='path_usage', driver='GPKG')
+
+plot_heat_map_of_edges(routes, graph, expanded=True).to_file(filename='graph.gpkg', layer='path_usage_expanded', driver='GPKG')
 
 # %%
 # load calculated routes from file
@@ -256,6 +363,9 @@ with open('calculated_shortest_routes.pickle', 'rb') as f:
 # filter out routes that are not valid
 def correct_routes(route: Route) -> bool:
     return route != None and len(route) > 1
+
+routes = [r for r in routes if correct_routes(r)]
+#%%
 
 routes = {idx: r for idx, r in enumerate(routes)}
 shortest_routes = {idx: r for idx, r in enumerate(shortest_routes)}
