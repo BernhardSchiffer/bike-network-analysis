@@ -2,7 +2,7 @@
 import osmnx as ox
 from utils.utils import *
 from utils.graph_builder import split_nodes
-from utils.utils import shift_graph, plot_shifted_graph
+from utils.utils import shift_graph, plot_shifted_graph, plot_graph
 
 # %%
 # fetch graph of all streets available by bike
@@ -28,5 +28,8 @@ graph = split_nodes(nx.DiGraph(graph))
 # %%
 
 shifted_graph = shift_graph(graph)
-plot_shifted_graph(shifted_graph, 'shifted_graph.gpkg', 'shifted_edges', plot_original_graph=True, debug_marker=False)
+edges_df, _, _ = plot_shifted_graph(shifted_graph)
+edges_df.to_file(filename='graph.gpkg', layer='shifted_graph', driver='GPKG')
+
+plot_graph(graph).to_file(filename='graph.gpkg', layer='original_graph', driver='GPKG')
 # %%
