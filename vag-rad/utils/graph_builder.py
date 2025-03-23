@@ -317,6 +317,7 @@ class GraphBuilder:
     # calculate edge weights according to their osm features
     def set_edge_weights(self, graph: nx.DiGraph) -> nx.DiGraph:
         weights: dict[tuple[int, int], dict[str, float]] = {}
+        penalties: dict[tuple[int, int], dict[str, float]] = {}
         problematic_osmids = []
         for u, v, data in tqdm(graph.edges(data=True), desc='calculating edge weights', total=len(graph.edges), unit='edges'):
             if 'osmid' not in data.keys():
@@ -324,8 +325,9 @@ class GraphBuilder:
                 continue
 
             try:
-                weight = self.get_weight(u, v, data)
-                weights[u,v] = {'weight': float(data['length'] * weight)}
+                penalty = self.get_weight(u, v, data)
+                penalties[u,v] = {'penalty': penalty}
+                weights[u,v] = {'weight': float(data['length'] * penalty)}
             except:
                 problematic_osmids.append(data['osmid'])
 
@@ -335,5 +337,6 @@ class GraphBuilder:
 
         # add weight attribute to graph
         nx.set_edge_attributes(graph, weights)
+        nx.set_edge_attributes(graph, penalties)
 
         return graph
