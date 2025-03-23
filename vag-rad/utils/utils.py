@@ -6,7 +6,7 @@ import tarfile
 import datetime
 import os
 import multiprocessing as mp
-from utils.types import *
+from utils.graph_types import *
 import leafmap.foliumap as leafmap
 import typing
 import matplotlib
@@ -301,3 +301,62 @@ def plot_graph(graph: nx.MultiDiGraph) -> GeoDataFrame:
     edges_df = GeoDataFrame(edges_df, crs='EPSG:4326').set_index(['u', 'v', 'key'])
 
     return edges_df
+
+def is_tuple(s: str) -> bool:
+    if type(s) != str:
+        return False
+    return s[0] == '(' and s[-1] == ')'
+
+def split_tuple(s: str) -> list[str]:
+    parts = []
+    part = ''
+    inside_tuple = False
+    for c in s:
+        if c == '(':
+            inside_tuple = True
+        elif c == ')':
+            inside_tuple = False
+        if c == ',' and not inside_tuple:
+            parts.append(part)
+            part = ''
+        else:
+            part = part + c
+    parts.append(part)
+
+    # remove leading and trailing whitespaces
+    parts = [p.strip() for p in parts]
+    return parts
+
+def get_reversed_key(k: EdgeId) -> EdgeId:
+    u, v, k = k
+    #check if string is tuple
+    if is_tuple(u):    
+        u = split_tuple(u[1:-1])
+        if is_tuple(u[0]):
+            u0, u1 = split_tuple(u[0][1:-1])
+            u[0] = (int(u1), int(u0))
+        else:
+            u[0] = int(u[0])
+        if is_tuple(u[1]):
+            u0, u1 = split_tuple(u[1][1:-1])
+            u[1] = (int(u1), int(u0))
+        else:
+            u[1] = int(u[1])
+        u = u[::-1]
+        u = str(tuple(u))
+    if is_tuple(v):
+        v = split_tuple(v[1:-1])
+        if is_tuple(v[0]):
+            v0, v1 = split_tuple(v[0][1:-1])
+            v[0] = (int(v1), int(v0))
+        else:
+            v[0] = int(v[0])
+        if is_tuple(v[1]):
+            v0, v1 = split_tuple(v[1][1:-1])
+            v[1] = (int(v1), int(v0))
+        else:
+            v[1] = int(v[1])
+        v = v[::-1]
+        v = str(tuple(v))
+
+    return (v, u, k)

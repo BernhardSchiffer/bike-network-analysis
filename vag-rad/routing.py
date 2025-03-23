@@ -13,7 +13,7 @@ import geopandas as gpd
 from collections import Counter
 import time
 from utils.utils import *
-from utils.types import *
+from utils.graph_types import *
 import pickle
 import numpy as np
 import igraph as ig
@@ -45,7 +45,6 @@ def plot_routes(routes: list[Route | None], graph: nx.MultiDiGraph, with_markers
     return map
 
 # calculate heat map for traveled edges
-#edges_counter = Counter()
 def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, expanded: bool = False) -> GeoDataFrame:
     cmap = plt.get_cmap('turbo')
     edges_counter = Counter()
@@ -81,7 +80,7 @@ def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, e
         'penalty': [],
         'slope': []
     }
-    for idx, data in tqdm(edges_df.iterrows(), desc='add count to edges', unit='edge', total=len(edges_df)):
+    for idx, _ in tqdm(edges_df.iterrows(), desc='add count to edges', unit='edge', total=len(edges_df)):
         try:
             count = edges_counter[idx]
             if count == 0:
@@ -121,83 +120,6 @@ def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, e
     columns_to_keep.extend(list(attributes.keys()))
     
     return edges_df#.reset_index(drop=True)
-
-#%%
-k1 = ('(1360463310, (1360463310, 1360463309))', '(1360463310, 1360463309)', 0)
-
-k2 = ('(1360463309, 1360463310)', '((1360463309, 1360463310), 1360463310)', 0)
-
-# reverse nested tuples
-
-
-def is_tuple(s: str) -> bool:
-    if type(s) != str:
-        return False
-    return s[0] == '(' and s[-1] == ')'
-
-def get_reversed_key(k: EdgeId) -> EdgeId:
-    u, v, k = k
-    #check if string is tuple
-    if is_tuple(u):    
-        u = split_tuple(u[1:-1])
-        if is_tuple(u[0]):
-            u0, u1 = split_tuple(u[0][1:-1])
-            u[0] = (int(u1), int(u0))
-        else:
-            u[0] = int(u[0])
-        if is_tuple(u[1]):
-            u0, u1 = split_tuple(u[1][1:-1])
-            u[1] = (int(u1), int(u0))
-        else:
-            u[1] = int(u[1])
-        u = u[::-1]
-        u = str(tuple(u))
-    if is_tuple(v):
-        v = split_tuple(v[1:-1])
-        if is_tuple(v[0]):
-            v0, v1 = split_tuple(v[0][1:-1])
-            v[0] = (int(v1), int(v0))
-        else:
-            v[0] = int(v[0])
-        if is_tuple(v[1]):
-            v0, v1 = split_tuple(v[1][1:-1])
-            v[1] = (int(v1), int(v0))
-        else:
-            v[1] = int(v[1])
-        v = v[::-1]
-        v = str(tuple(v))
-
-    return (v, u, k)
-
-print(get_reversed_key(k2))
-print(get_reversed_key(k2) == k1)
-#%%
-
-s = '1360463310, (1360463310, 1360463309)'
-
-# split the string only at the comma that is not inside a tuple
-def split_tuple(s: str) -> list[str]:
-    parts = []
-    part = ''
-    inside_tuple = False
-    for c in s:
-        if c == '(':
-            inside_tuple = True
-        elif c == ')':
-            inside_tuple = False
-        if c == ',' and not inside_tuple:
-            parts.append(part)
-            part = ''
-        else:
-            part = part + c
-    parts.append(part)
-
-    # remove leading and trailing whitespaces
-    parts = [p.strip() for p in parts]
-    return parts
-
-split_tuple(s)
-# shift k1 so that it is equal to k2
 
 #%%
 # Setup environment
