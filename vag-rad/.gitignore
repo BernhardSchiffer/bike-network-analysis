@@ -39,3 +39,6 @@ scraper/download_all.sh
 !k-modes_cost_analysis.png
 
 tmp/
+
+# geopackages
+*.gpkg
