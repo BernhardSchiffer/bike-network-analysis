@@ -13,14 +13,14 @@ import geopandas as gpd
 from collections import Counter
 import time
 from utils.utils import *
-from utils.types import *
+from utils.graph_types import *
 import pickle
 import numpy as np
 import igraph as ig
 import leafmap.foliumap as leafmap
 from tqdm import tqdm
 
-CPU_COUNT = 16
+CPU_COUNT = 1
 
 # %%
 # helper functions
@@ -45,36 +45,81 @@ def plot_routes(routes: list[Route | None], graph: nx.MultiDiGraph, with_markers
     return map
 
 # calculate heat map for traveled edges
-def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, expanded: bool = False):
-    nodes = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
+def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, expanded: bool = False) -> GeoDataFrame:
     cmap = plt.get_cmap('turbo')
     edges_counter = Counter()
 
-    for route in routes:
-        if route:
-            start_node = route[0]
-            for node in route[1:]:
-                edges_counter.update([(start_node, node)])
-                start_node = node
+    for route in tqdm(routes, desc='count edges', unit='route'):
+        edges = route_to_edge_ids(route)
+        edges_counter.update(edges)
 
-    map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
+    # collapse edges with same nodes ie. edges with different directions
+    if not expanded:
+        print(f'number of edges: {len(edges_counter)}')
+        for edge in list(edges_counter.keys()):
+            reversed_edge = get_reversed_key(edge)
+            if reversed_edge in edges_counter:
+                edges_counter[edge] = edges_counter[edge] + edges_counter[reversed_edge]
+                edges_counter.pop(reversed_edge)
+        print(f'number of edges after collapsing: {len(edges_counter)}')
 
     max_value = edges_counter.most_common(1)[0][1]
 
-    for edge, count in edges_counter.items():
-        positions = []
-        for node_id in edge:
-            node = nodes.loc[node_id]
-            positions.append((node['y'], node['x']))
-        if not expanded:
-            positions = set(positions)
-            if(len(positions) == 1):
+    if expanded:
+        edges_df, _, _ = plot_shifted_graph(graph)
+    else:
+        edges_df = plot_graph(graph)
+
+    to_remove_edges = []
+    attributes = {
+        'count': [], 
+        'color': [], 
+        'osmid': [], 
+        'weight': [], 
+        'length': [], 
+        'penalty': [],
+        'slope': []
+    }
+    for idx, _ in tqdm(edges_df.iterrows(), desc='add count to edges', unit='edge', total=len(edges_df)):
+        try:
+            count = edges_counter[idx]
+            if count == 0:
+                to_remove_edges.append(idx)
                 continue
-        color = matplotlib.colors.to_hex(cmap(count/max_value))
-        folium.PolyLine(positions, color=color, tooltip=count).add_to(map)
+            if not expanded:
+                try:
+                    s, d, k = idx
+                    graph.edges[s, d, k]['turning_angle']
+                    to_remove_edges.append((s, d, k))
+                    continue
+                except KeyError:
+                    pass
+            attributes['count'].append(count)
+            color = matplotlib.colors.to_hex(cmap(count/max_value))
+            attributes['color'].append(color)
+            attributes['osmid'].append(graph.edges[idx].get('osmid', None))
+            weight = graph.edges[idx].get('weight', None)
+            attributes['weight'].append(weight)
+            length = graph.edges[idx].get('length', None)
+            attributes['length'].append(length)
+            penalty = graph.edges[idx].get('penalty', None)
+            attributes['penalty'].append(penalty)
+            attributes['slope'].append(graph.edges[idx].get('slope_percentage', None))
+        except KeyError:
+            to_remove_edges.append((s, d, k))
+            continue
+
+    # drop rows
+    edges_df = edges_df.drop(to_remove_edges)
+
+    # add column for count and add the counts list
+    for key, value in attributes.items():
+        edges_df[key] = value
+    # only keep columns that are needed
+    columns_to_keep = ['geometry', 'line_width']
+    columns_to_keep.extend(list(attributes.keys()))
     
-    map.add_colormap(position='bottomright', width=4.0, height=0.3, vmin=0, vmax=max_value, cmap='turbo')
-    return map
+    return edges_df#.reset_index(drop=True)
 
 #%%
 # Setup environment
@@ -88,7 +133,7 @@ POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 
 # %% 
 # load weighted graph from file
-graph = ox.io.load_graphml('weighted_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float})
+graph = ox.io.load_graphml('expanded_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float})
 graph_small = ox.io.load_graphml('small_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float})
 
 # some statistics of the graph
@@ -101,8 +146,8 @@ print(f'length of network: {sum(edges["length"])} meters')
 # %% 
 # get rides of all bikes over time
 
-limit = 1000000
-minimal_distance = 150
+limit = 100000
+minimal_distance = 250
 max_distance = 20000
 max_duration = 60 * 60
 
@@ -146,7 +191,7 @@ conn.close()
 
 # %%
 # calculate shortest routes and plot on map
-trips = df.head(1000000)
+trips = df.head(10000)
 print(f'{len(trips)} trips')
 
 starting_positions = trips['starting_position']
@@ -164,9 +209,8 @@ finishing_node_ids = ox.distance.nearest_nodes(graph_small, x, y)
 end = time.time()
 print(f'finished calculating nearest nodes in {end - start} seconds')
 
-# %%
 # calculate direct route between starting and finishing nodes
-# the lookup in the graph, i.e. in the a star algorithm, is to much overhead be more efficient than the djikstra algorithm
+# the lookup in the graph, i.e. in the a star algorithm, is too much overhead be more efficient than the djikstra algorithm
 def distance(a, b):
     a = graph_small.nodes[a]
     b = graph_small.nodes[b]
@@ -189,7 +233,7 @@ plot_heat_map_of_edges(shortest_routes, graph_small).save('shortest_routes.html'
 
 # %%
 # calculate trips based on the new weight metric based on osm features
-trips = df.head(1000000)
+trips = df.head(10000)
 print(f'{len(trips)} trips')
 
 starting_positions = trips['starting_position']
@@ -220,7 +264,9 @@ file.close()
 
 # %%
 # plot heatmap of calculated routes
-plot_heat_map_of_edges(routes, graph).save('weighted_routes.html')
+plot_heat_map_of_edges(routes, graph, expanded=False).to_file(filename='graph.gpkg', layer='path_usage', driver='GPKG')
+
+plot_heat_map_of_edges(routes, graph, expanded=True).to_file(filename='graph.gpkg', layer='path_usage_expanded', driver='GPKG')
 
 # %%
 # load calculated routes from file
@@ -235,6 +281,9 @@ with open('calculated_shortest_routes.pickle', 'rb') as f:
 # filter out routes that are not valid
 def correct_routes(route: Route) -> bool:
     return route != None and len(route) > 1
+
+routes = [r for r in routes if correct_routes(r)]
+#%%
 
 routes = {idx: r for idx, r in enumerate(routes)}
 shortest_routes = {idx: r for idx, r in enumerate(shortest_routes)}
@@ -486,4 +535,14 @@ plot_edge_heatmap(edge_benefits).save('gaps_benefit.html')
 # %%
 plot_edge_heatmap(not_gap_df)
 
+# %%
+filters = {}
+filters["bike"] = (
+        f'["highway"]["area"!~"yes"]'
+        f'["highway"!~"abandoned|bus_guideway|construction|corridor|elevator|escalator|footway|'
+        f'motor|no|planned|platform|proposed|raceway|razed|steps"]'
+        f'["bicycle"!~"no"]["service"!~"private"]'
+    )
+# %%
+filters['bike']
 # %%

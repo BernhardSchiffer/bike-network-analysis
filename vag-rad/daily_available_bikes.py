@@ -10,7 +10,7 @@ from matplotlib.dates import DayLocator, MonthLocator, WeekdayLocator
 from utils.utils import get_files_in_daterange, extract_archive_to_dir, handler
 import pytz
 import shutil
-from utils.types import *
+from utils.graph_types import *
 
 # %%
 # get unique bikes per day
