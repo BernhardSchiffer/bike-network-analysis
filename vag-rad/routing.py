@@ -233,7 +233,7 @@ plot_heat_map_of_edges(shortest_routes, graph_small).save('shortest_routes.html'
 
 # %%
 # calculate trips based on the new weight metric based on osm features
-trips = df.head(10000)
+trips = df.head(100000)
 print(f'{len(trips)} trips')
 
 starting_positions = trips['starting_position']
@@ -278,13 +278,6 @@ with open('calculated_shortest_routes.pickle', 'rb') as f:
     shortest_routes = pickle.load(f)
 
 # %%
-# filter out routes that are not valid
-def correct_routes(route: Route) -> bool:
-    return route != None and len(route) > 1
-
-routes = [r for r in routes if correct_routes(r)]
-#%%
-
 routes = {idx: r for idx, r in enumerate(routes)}
 shortest_routes = {idx: r for idx, r in enumerate(shortest_routes)}
 
@@ -416,133 +409,4 @@ for edge, count in zip(graph.edges(), ebc):
 map.add_colormap(position=(55,3), width=4.0, height=0.3, vmin=0, vmax=max_value, cmap='turbo')
 map.save('ebc_length.html')
 
-# %%
-# fetch graph of bicycle infrastructure
-place_name = 'Nürnberg'
-network_type = 'bike'
-bike_lane_filter = [
-    '["cycleway"="lane"]',
-    '["cycleway:right"="lane"]',
-    '["cycleway:left"="lane"]',
-    '["cycleway:both"="lane"]',
-    '["cycleway"="opposite"]'
-]
-bike_path_filter = [
-    '["bicycle"="designated"]',
-    '["highway"="cycleway"]',
-    '["cycleway"="track"]',
-    '["cycleway:right"="track"]',
-    '["cycleway:left"="track"]',
-    '["cycleway:both"="track"]'
-]
-bike_road_filter = [
-    '["bicycle_road"="yes"]'
-]
-custom_filter = bike_path_filter
-bike_infra_graph = ox.graph_from_place(query=place_name, retain_all=True, simplify=False, custom_filter=custom_filter)
-
-osmids_with_bike_infra = set(ox.graph_to_gdfs(bike_infra_graph, edges=True, nodes=False)['osmid'].values)
-
-weights: dict[edgeId, dict[str, bool]] = {}
-problematic_osmids = []
-for u, v, data in tqdm(graph.edges(data=True), desc='look if bike infra is present', total=len(graph.edges), unit='edges'):
-    try:
-        weights[u,v,0] = {'has_bike_infra': data['osmid'] in osmids_with_bike_infra} 
-    except KeyError:
-        continue
-
-# add weight attribute to graph
-nx.set_edge_attributes(graph, weights)
-# %%
-# finding gaps between bicycle paths
-def get_gaps_for_route(route: Route, graph: nx.MultiDiGraph):
-    gaps: list[EdgeId] = []
-    not_gaps: list[EdgeId] = []
-
-    route_edges = route_to_edge_ids(route)
-    for route_edge in route_edges:
-        try:
-            if graph.edges[route_edge]['has_bike_infra']:
-                not_gaps.append(route_edge)
-            else:
-                gaps.append(route_edge)
-        except KeyError:
-            continue
-    return (gaps, not_gaps)
-
-#%%
-gaps: list[EdgeId] = []
-not_gaps: list[EdgeId] = []
-for route in tqdm(routes, desc='finding gaps in routes', unit='route'):
-    result = get_gaps_for_route(route, graph)
-    gaps.extend(result[0])
-    not_gaps.extend(result[1])
-
-print(f'{len(set(gaps))} road segments have no bike infrastructure')
-print(f'{len(set(not_gaps))} road segments have bike infrastructure')
-
-# %%
-df = ox.graph_to_gdfs(bike_infra_graph, edges=True, nodes=False)
-df
-
-#%%
-c = Counter(gaps)
-c.most_common(2)
-# %%
-gap_counter = Counter(gaps)
-edge_benefits = ox.graph_to_gdfs(graph, nodes=False, edges=True).loc[list(set(gaps))]
-
-benefits = []
-counts = []
-for idx, data in edge_benefits.iterrows():
-    counts.append(gap_counter[idx])
-    benefit = data['length'] * gap_counter[idx]
-    benefits.append(benefit)
-edge_benefits = edge_benefits.assign(benefit=benefits)
-edge_benefits = edge_benefits.assign(count=counts)
-
-edge_benefits
-
-# %%
-
-def plot_edge_heatmap(edges: gpd.GeoDataFrame):
-    cmap = plt.get_cmap('Reds')
-    
-    benefits = edges['benefit'].values
-    counts = edges['count'].values
-    plt.scatter(counts, benefits, s=1)
-    plt.xlabel("count of rides on this gap")
-    plt.ylabel("overall benefit")
-    plt.grid()
-    plt.show()
-
-    max_benefit = max(edges['benefit'].values)
-
-    map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
-
-    for _, data in edges.iterrows():
-        p1, p2 = data['geometry'].coords
-        p1 = (p1[1], p1[0])
-        p2 = (p2[1], p2[0])
-        color = matplotlib.colors.to_hex(cmap(data['benefit']/max_benefit))
-        folium.PolyLine((p1, p2), color=color, tooltip=f"count: {data['count']}; benefit: {data['benefit']}").add_to(map)
-    
-    map.add_colormap(position='bottomright', width=4.0, height=0.3, vmin=0, vmax=max_benefit, cmap='Reds')
-    return map
-
-plot_edge_heatmap(edge_benefits).save('gaps_benefit.html')
-
-# %%
-plot_edge_heatmap(not_gap_df)
-
-# %%
-filters = {}
-filters["bike"] = (
-        f'["highway"]["area"!~"yes"]'
-        f'["highway"!~"abandoned|bus_guideway|construction|corridor|elevator|escalator|footway|'
-        f'motor|no|planned|platform|proposed|raceway|razed|steps"]'
-        f'["bicycle"!~"no"]["service"!~"private"]'
-    )
-# %%
-filters['bike']
 # %%

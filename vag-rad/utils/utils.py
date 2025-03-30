@@ -78,6 +78,10 @@ def handler(func, path, exc_info):
     print("Inside handler")
     print(exc_info)
 
+# filter out routes that are not valid
+def correct_routes(route: Route) -> bool:
+    return route != None and len(route) > 1
+
 def a_star(
     graph: nx.Graph, 
     orig: EdgeId, 

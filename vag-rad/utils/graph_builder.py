@@ -210,6 +210,21 @@ class GraphBuilder:
             pickle.dump(self.edges_osm_data_lookup, file)
             file.close()
 
+    # add paths where the street is oneway but bikes are allowed in both directions
+    def add_paths_for_bikeable_oneways(self, graph: nx.DiGraph) -> nx.DiGraph:
+        for u, v, data in tqdm(graph.edges(data=True), desc='looking for bikeable onewaystreets', total=len(graph.edges), unit='edges'):
+            osmid = data['osmid']
+            tags = self.edges_osm_data_lookup.loc[osmid]['tags']
+            if data['oneway'] == True and tags.get('oneway:bicycle', None) == 'no':
+                # check if the path is also oneway for bikes
+                graph.edges[u, v]['oneway'] = False
+                data_for_reversed_path = data.copy()
+                data_for_reversed_path['reversed'] = True
+                data_for_reversed_path['oneway'] = False
+                # add reversed path to graph
+                graph.add_edge(v, u, **data_for_reversed_path)
+        return graph
+
     def get_elevation(self, lon, lat):
         x, y = self.osm_to_geotiff.transform(lat, lon)
         idx = self.dat.index(x, y, precision=1E-6)
