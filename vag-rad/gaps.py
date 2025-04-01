@@ -59,10 +59,6 @@ for u, v, data in tqdm(graph.edges(data=True), desc='look if bike infra is prese
 nx.set_edge_attributes(graph, weights)
 
 # %%
-for e in graph.edges(data=True):
-    print(e)
-    break
-# %%
 # finding gaps between bicycle paths
 def get_gaps_for_route(route: Route, graph: nx.MultiDiGraph):
     gaps: list[EdgeId] = []
@@ -194,7 +190,6 @@ def plot_edge_heatmap(gaps: list[EdgeId], graph: nx.MultiDiGraph, expanded: bool
 
     return gaps_df
 
-
 plot_edge_heatmap(gaps, graph, expanded=False).to_file('graph.gpkg', layer='gaps', driver='GPKG')
 
 plot_edge_heatmap(gaps, graph, expanded=True).to_file('graph.gpkg', layer='gaps_exanded', driver='GPKG')
@@ -203,17 +198,4 @@ plot_edge_heatmap(gaps, graph, expanded=False, metric='benefit').to_file('graph.
 
 plot_edge_heatmap(gaps, graph, expanded=True, metric='benefit').to_file('graph.gpkg', layer='gaps_exanded_benefit', driver='GPKG')
 
-# %%
-list(edge_benefits.index)
-# %%
-
-ox.graph_to_gdfs(graph, nodes=False, edges=True)
-# %%
-
-gaps_df = plot_graph(graph)
-
-for idx, data in gaps_df.iterrows():
-
-    print(idx, data['geometry'])
-    break
 # %%

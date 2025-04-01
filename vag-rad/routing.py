@@ -264,9 +264,11 @@ file.close()
 
 # %%
 # plot heatmap of calculated routes
-plot_heat_map_of_edges(routes, graph, expanded=False).to_file(filename='graph.gpkg', layer='path_usage', driver='GPKG')
+valid_routes = [r for r in routes if correct_routes(r)]
 
-plot_heat_map_of_edges(routes, graph, expanded=True).to_file(filename='graph.gpkg', layer='path_usage_expanded', driver='GPKG')
+plot_heat_map_of_edges(valid_routes, graph, expanded=False).to_file(filename='graph.gpkg', layer='path_usage', driver='GPKG')
+
+plot_heat_map_of_edges(valid_routes, graph, expanded=True).to_file(filename='graph.gpkg', layer='path_usage_expanded', driver='GPKG')
 
 # %%
 # load calculated routes from file
@@ -387,26 +389,85 @@ plot_heat_map_of_edges(routes, graph)
 wg: ig.Graph = ig.Graph.from_networkx(graph)
 
 # %%
-ebc = wg.edge_betweenness(directed = False, cutoff = 4500, weights = "length")
+ebc = wg.edge_betweenness(directed=True, cutoff=4500, weights="length")
 
 # %%
-nodes = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
-cmap = plt.get_cmap('turbo')
-map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
+def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], expanded: bool = False) -> GeoDataFrame:
+    cmap = plt.get_cmap('turbo')
+    edges_counter = Counter()
 
-max_value = max(ebc)
+    for edge, count in tqdm(zip(graph.edges, ebc), desc='count edges', unit='route'):
+        edges_counter[edge] = count
 
-for edge, count in zip(graph.edges(), ebc):
-    if('turning_angle' in edge[2]):
-        continue
-    positions = []
-    for node_id in edge:
-        node = nodes.loc[node_id]
-        positions.append((node['y'], node['x']))
-    color = matplotlib.colors.to_hex(cmap(count/max_value))
-    folium.PolyLine(positions, color=color, tooltip=count).add_to(map)
+    # collapse edges with same nodes ie. edges with different directions
+    if not expanded:
+        print(f'number of edges: {len(edges_counter)}')
+        for edge in list(edges_counter.keys()):
+            reversed_edge = get_reversed_key(edge)
+            if reversed_edge in edges_counter:
+                edges_counter[edge] = edges_counter[edge] + edges_counter[reversed_edge]
+                edges_counter.pop(reversed_edge)
+        print(f'number of edges after collapsing: {len(edges_counter)}')
 
-map.add_colormap(position=(55,3), width=4.0, height=0.3, vmin=0, vmax=max_value, cmap='turbo')
-map.save('ebc_length.html')
+    max_value = edges_counter.most_common(1)[0][1]
 
+    if expanded:
+        edges_df, _, _ = plot_shifted_graph(graph)
+    else:
+        edges_df = plot_graph(graph)
+
+    to_remove_edges = []
+    attributes = {
+        'count': [], 
+        'color': [], 
+        'osmid': [], 
+        'weight': [], 
+        'length': [], 
+        'penalty': [],
+        'slope': []
+    }
+    for idx, _ in tqdm(edges_df.iterrows(), desc='add count to edges', unit='edge', total=len(edges_df)):
+        try:
+            count = edges_counter[idx]
+            if count == 0:
+                to_remove_edges.append(idx)
+                continue
+            if not expanded:
+                try:
+                    s, d, k = idx
+                    graph.edges[s, d, k]['turning_angle']
+                    to_remove_edges.append((s, d, k))
+                    continue
+                except KeyError:
+                    pass
+            attributes['count'].append(count)
+            color = matplotlib.colors.to_hex(cmap(count/max_value))
+            attributes['color'].append(color)
+            attributes['osmid'].append(graph.edges[idx].get('osmid', None))
+            weight = graph.edges[idx].get('weight', None)
+            attributes['weight'].append(weight)
+            length = graph.edges[idx].get('length', None)
+            attributes['length'].append(length)
+            penalty = graph.edges[idx].get('penalty', None)
+            attributes['penalty'].append(penalty)
+            attributes['slope'].append(graph.edges[idx].get('slope_percentage', None))
+        except KeyError:
+            to_remove_edges.append((s, d, k))
+            continue
+
+    # drop rows
+    edges_df = edges_df.drop(to_remove_edges)
+
+    # add column for count and add the counts list
+    for key, value in attributes.items():
+        edges_df[key] = value
+    # only keep columns that are needed
+    columns_to_keep = ['geometry', 'line_width']
+    columns_to_keep.extend(list(attributes.keys()))
+
+    return edges_df#.reset_index(drop=True)
+
+plot_edge_betweenness_centrality(graph, ebc).to_file(filename='graph.gpkg', layer='ebc_length', driver='GPKG')
+
+plot_edge_betweenness_centrality(graph, ebc, expanded=True).to_file(filename='graph.gpkg', layer='ebc_length_expanded', driver='GPKG')
 # %%
