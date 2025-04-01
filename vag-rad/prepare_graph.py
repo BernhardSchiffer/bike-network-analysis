@@ -6,6 +6,7 @@ import folium
 import leafmap.foliumap as leafmap
 from utils.graph_builder import GraphBuilder, split_nodes
 from utils.utils import shift_graph, plot_shifted_graph, plot_graph
+from tqdm import tqdm
 
 # %%
 def debug_plot(graph: nx.DiGraph):
@@ -35,10 +36,24 @@ bikeable_ways = (
     )
 
 bikeable_areas = '["area"~"yes"]["bicycle"~"yes"]'
-bikeable_footpaths = '["highway"~"footway"]["bicycle"~"yes"]'
+bikeable_footpaths = '["highway"~"footway"]["bicycle"~"yes|designated"]'
+bikeable_crossings = '["crossing"~"yes"]["bicycle"~"yes"]'
 
 graph = ox.graph_from_place(query=place_name, simplify=False, retain_all=True, custom_filter=[bikeable_ways, bikeable_areas, bikeable_footpaths])
 #graph = ox.graph_from_bbox((11.112403,49.454498,11.112832,49.454774), network_type='bike', simplify=False, retain_all=True, truncate_by_edge=True)
+print('number of edges in bikeable graph:', len(graph.edges))
+
+not_bikeable_ways = '["highway"~"pedestrian"]["bicycle"!~"yes"]'
+
+not_bikeable_graph = ox.graph_from_place(query=place_name, simplify=False, retain_all=True, custom_filter=[not_bikeable_ways])
+print('number of edges in not bikeable graph:', len(not_bikeable_graph.edges))
+
+for e in tqdm(not_bikeable_graph.edges, desc='remove not bikeable edges', total=len(not_bikeable_graph.edges), unit='edges'):
+    # remove edges that are not bikeable
+    if graph.has_edge(*e):
+        graph.remove_edge(*e)
+
+print('number of edges in bikeable graph after removing not bikeable edges:', len(graph.edges))
 
 graph = nx.DiGraph(graph)
 #%%
