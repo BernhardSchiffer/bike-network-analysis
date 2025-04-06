@@ -229,7 +229,7 @@ pickle.dump(shortest_routes, file)
 file.close()
 
 # %%
-plot_heat_map_of_edges(shortest_routes, graph_small).save('shortest_routes.html')
+plot_heat_map_of_edges([ s for s in shortest_routes if correct_routes(s)], graph_small).save('shortest_routes.html')
 
 # %%
 # calculate trips based on the new weight metric based on osm features
@@ -389,7 +389,10 @@ plot_heat_map_of_edges(routes, graph)
 wg: ig.Graph = ig.Graph.from_networkx(graph)
 
 # %%
-ebc = wg.edge_betweenness(directed=True, cutoff=4500, weights="length")
+start = time.time()
+ebc = wg.edge_betweenness(directed=True, cutoff=4500, weights="weight")
+end = time.time()
+print(f'calculated edge betweenness centrality in {end - start} seconds')
 
 # %%
 def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], expanded: bool = False) -> GeoDataFrame:
@@ -470,4 +473,117 @@ def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], e
 plot_edge_betweenness_centrality(graph, ebc).to_file(filename='graph.gpkg', layer='ebc_length', driver='GPKG')
 
 plot_edge_betweenness_centrality(graph, ebc, expanded=True).to_file(filename='graph.gpkg', layer='ebc_length_expanded', driver='GPKG')
+# %%
+
+def plot_difference_between_edge_betweenness_and_route_count(graph: nx.MultiDiGraph, ebc: list[float], routes: list[EdgeId], expanded: bool = False) -> GeoDataFrame:
+    cmap = plt.get_cmap('coolwarm')
+
+    ebc_counter = Counter()
+    for edge, count in zip(graph.edges, ebc):
+        ebc_counter[edge] = count
+
+    edges_counter = Counter()
+    for route in routes:
+        edges = route_to_edge_ids(route)
+        edges_counter.update(edges)
+
+    # collapse edges with same nodes ie. edges with different directions
+    if not expanded:
+        print(f'number of edges: {len(edges_counter)}')
+        for edge in list(edges_counter.keys()):
+            reversed_edge = get_reversed_key(edge)
+            if reversed_edge in edges_counter:
+                edges_counter[edge] = edges_counter[edge] + edges_counter[reversed_edge]
+                edges_counter.pop(reversed_edge)
+        print(f'number of edges after collapsing: {len(edges_counter)}')
+        print(f'number of edges: {len(ebc_counter)}')
+        for edge in list(ebc_counter.keys()):
+            reversed_edge = get_reversed_key(edge)
+            if reversed_edge in ebc_counter:
+                ebc_counter[edge] = ebc_counter[edge] + ebc_counter[reversed_edge]
+                ebc_counter.pop(reversed_edge)
+        print(f'number of edges after collapsing: {len(ebc_counter)}')
+
+    # normalize values
+    max_value = ebc_counter.most_common(1)[0][1]
+    for edge, count in ebc_counter.items():
+        ebc_counter[edge] = count / max_value
+
+    # normalize values
+    max_value = edges_counter.most_common(1)[0][1]
+    for edge, count in edges_counter.items():
+        edges_counter[edge] = count / max_value
+
+    if expanded:
+        edges_df, _, _ = plot_shifted_graph(graph)
+    else:
+        edges_df = plot_graph(graph)
+
+    to_remove_edges = []
+    attributes = {
+        'count_rwd': [],
+        'count_ebc': [],
+        'diff': [],
+        'color': [], 
+        'osmid': [], 
+        'weight': [], 
+        'length': [], 
+        'penalty': [],
+        'slope': []
+    }
+    for idx, _ in tqdm(edges_df.iterrows(), desc='add count to edges', unit='edge', total=len(edges_df)):
+        try:
+            count = edges_counter[idx]
+            count_ebc = ebc_counter[idx]
+            if count == 0 and count_ebc == 0:
+                to_remove_edges.append(idx)
+                continue
+            if not expanded:
+                try:
+                    s, d, k = idx
+                    graph.edges[s, d, k]['turning_angle']
+                    to_remove_edges.append((s, d, k))
+                    continue
+                except KeyError:
+                    pass
+            
+            attributes['count_rwd'].append(count)
+            attributes['count_ebc'].append(count_ebc)
+            # get difference between ebc and route count
+            diff = count_ebc - count
+            attributes['diff'].append(diff)
+            attributes['osmid'].append(graph.edges[idx].get('osmid', None))
+            weight = graph.edges[idx].get('weight', None)
+            attributes['weight'].append(weight)
+            length = graph.edges[idx].get('length', None)
+            attributes['length'].append(length)
+            penalty = graph.edges[idx].get('penalty', None)
+            attributes['penalty'].append(penalty)
+            attributes['slope'].append(graph.edges[idx].get('slope_percentage', None))
+        except KeyError:
+            to_remove_edges.append((s, d, k))
+            continue
+    
+    attributes['diff'] = np.interp(attributes['diff'], (min(attributes['diff']), max(attributes['diff'])), (0, +1))
+    for diff in attributes['diff']:
+        color = matplotlib.colors.to_hex(cmap(diff))
+        attributes['color'].append(color)
+
+    # drop rows
+    edges_df = edges_df.drop(to_remove_edges)
+
+    # add column for count and add the counts list
+    for key, value in attributes.items():
+        edges_df[key] = value
+    # only keep columns that are needed
+    columns_to_keep = ['geometry', 'line_width']
+    columns_to_keep.extend(list(attributes.keys()))
+
+    return edges_df#.reset_index(drop=True)
+
+valid_routes = [r for r in routes if correct_routes(r)]
+
+plot_difference_between_edge_betweenness_and_route_count(graph, ebc, valid_routes).to_file(filename='graph.gpkg', layer='usage_diff', driver='GPKG')
+
+plot_difference_between_edge_betweenness_and_route_count(graph, ebc, valid_routes, expanded=True).to_file(filename='graph.gpkg', layer='usage_diff_expanded', driver='GPKG')
 # %%
