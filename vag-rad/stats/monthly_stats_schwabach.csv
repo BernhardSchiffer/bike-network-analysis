@@ -1,3 +1,4 @@
 year;month;median_number_of_available_bikes;mean_number_of_available_bikes;max_number_of_available_bikes;min_number_of_available_bikes
 2025;February;30.0;42.357142857142854;68;28
-2025;March;61.0;61.689655172413794;73;58
+2025;March;61.0;61.70967741935484;73;58
+2025;April;55.0;54.9375;60;52
