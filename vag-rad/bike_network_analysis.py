@@ -1,6 +1,5 @@
 # %% 
 # imports
-import matplotlib.colors
 import osmium.filter
 import osmium.osm
 import osmnx as ox
@@ -10,7 +9,10 @@ import matplotlib
 import matplotlib.pyplot as plt
 import osmium
 from collections import Counter
-
+import geopandas as gpd
+from shapely.geometry import Polygon
+from tqdm import tqdm
+import rasterio
 from utils.polygon_filter import PolygonFilter
 from utils.utils import *
 
@@ -84,6 +86,7 @@ bike_road_filter = [
 ]
 custom_filter = bike_path_filter
 graph = ox.graph_from_place(query=place_name, retain_all=True, custom_filter=custom_filter)
+nbg_graph = ox.graph_from_place(query=place_name, retain_all=True, network_type='all_public')
 
 # %% 
 # some statistics of the graph
@@ -147,5 +150,90 @@ plt.show()
 
 print(f'average length of component: {sum(lengths)/len(lengths)} meters')
 print(f'median length of component: {lengths[int(len(lengths)/2)]} meters')
+
+# %%
+# analyse the coverage of the bike network
+
+# get all edges that are on the shortest path from a node to all other nodes in a certain radius
+def get_shortest_path_edges(graph: nx.MultiDiGraph, node: int, radius: float):
+    subgraph = nx.ego_graph(graph, node, radius=radius, distance='length', undirected=True)
+    if subgraph.edges is None or len(subgraph.edges) == 0:
+        return None
+    else:
+        return ox.graph_to_gdfs(subgraph, nodes=False, edges=True)
+
+def get_area_near_node(graph: nx.MultiDiGraph, node: int, radius: float) -> Polygon:
+    edges = get_shortest_path_edges(graph, node, radius)
+    if edges is None:
+        return None
+    edges = edges.to_crs(3043).buffer(50).to_crs(4326)
+    return Polygon(edges.unary_union.exterior.coords)
+
+polygons = []
+for node in tqdm(list(graph.nodes)):
+    if node not in nbg_graph.nodes:
+        continue
+    area = get_area_near_node(nbg_graph, node, radius=300)
+    if area is not None:
+        polygons.append(area)
+
+# %%
+overall_polygon = gpd.GeoSeries(polygons).unary_union
+gpd.GeoDataFrame(geometry=[gpd.GeoSeries(polygons).unary_union], crs=4326).explore()
+
+#%%
+bike_way_polygon = ox.graph_to_gdfs(graph, nodes=False, edges=True).to_crs(3043).buffer(30).to_crs(4326).unary_union
+gpd.GeoDataFrame(geometry=[bike_way_polygon], crs=4326).explore()
+# %%
+protected_bike_infra_coverage = gpd.GeoDataFrame(geometry=[gpd.GeoSeries([gpd.GeoSeries(polygons).unary_union, bike_way_polygon]).unary_union], crs=4326)
+# %%
+protected_bike_infra_coverage['geometry'].values[0]
+# %%
+protected_bike_infra_coverage.explore()
+# %%
+nbg_polygon = ox.geocode_to_gdf('Nürnberg').to_crs(3043)['geometry']
+nbg_polygon
+# %%
+
+# %%
+protected_bike_infra_coverage.to_crs(3043).area / nbg_polygon.area * 100
+# %%
+population_src: rasterio.DatasetReader = rasterio.open('GHS_POP_E2025_GLOBE_R2023A_4326_3ss_V1_0_R4_C20.tif')
+# read all the data from the first band
+population_data = population_src.read()[0]
+
+# %%
+nbg_place = ox.geocode_to_gdf('Nürnberg')
+nbg_polygon = nbg_place['geometry'].values[0]
+
+row_start ,col_start = population_src.index(nbg_place['bbox_west'], nbg_place['bbox_north'])
+row_end ,col_end = population_src.index(nbg_place['bbox_east'], nbg_place['bbox_south'])
+
+total_population = 0
+population_near_bike_infra = 0
+
+for row in range(row_start, row_end + 1):
+    for col in range(col_start, col_end + 1):
+        polygon = Polygon([
+            population_src.transform * (col, row),
+            population_src.transform * (col, row + 1),
+            population_src.transform * (col + 1, row + 1),
+            population_src.transform * (col + 1, row)
+        ])
+        if nbg_polygon.contains(polygon):
+            total_population += population_data[row, col]
+
+            intersection = polygon.intersection(protected_bike_infra_coverage['geometry'].values[0])
+            if not intersection.is_empty:
+                population_near_bike_infra += intersection.area / polygon.area * population_data[row, col]
+    
+print(f'Total population in Nürnberg: {total_population}')
+print(f'Population near protected bike infrastructure: {population_near_bike_infra}')
+print(f'Population near protected bike infrastructure: {population_near_bike_infra / total_population * 100:.2f}%')
+# %%
+gpd.GeoDataFrame(geometry=[intersection], crs=4326).explore()
+
+# %%
+bike_way_polygon
 
 # %%

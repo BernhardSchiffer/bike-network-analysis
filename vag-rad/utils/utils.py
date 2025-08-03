@@ -122,10 +122,10 @@ def get_arrow_head(start: list[float], dest: list[float], color: str) -> leafmap
     arrow_pos = [arrow_pos.coords[0][0], arrow_pos.coords[0][1]]
     return leafmap.folium.RegularPolygonMarker(location=arrow_pos, color=color, fill=True, fill_color=color, fill_opacity=1, number_of_sides=3, rotation=rot, radius=5)
 
+def transform_coordinates(coords: list[float], transformer: Transformer) -> list[float]:
+    return [transformer.transform(coord[0], coord[1]) for coord in coords]
+
 def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
-    osm_to_gk = Transformer.from_crs("EPSG:4326", "EPSG:31468")
-    gk_to_osm = Transformer.from_crs("EPSG:31468", "EPSG:4326")
-    
     graph = graph.copy()
 
     # calculate shifted coordinates for each node
@@ -133,9 +133,11 @@ def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
         in_edges = list(graph.in_edges(node, data=True))
         out_edges = list(graph.out_edges(node, data=True))
         edges = in_edges + out_edges
+
         reversed_coords = []
         not_reversed_coords = []
         street_edges = []
+
         for edge in edges:
             s, d, data = edge
             # edge is an edge that represents a turning option at an intersection
@@ -145,37 +147,52 @@ def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
             else:
                 # edge represents a street
                 street_edges.append(edge)
-            s_x, s_y = osm_to_gk.transform(graph.nodes[s]['x'], graph.nodes[s]['y'])
-            d_x, d_y = osm_to_gk.transform(graph.nodes[d]['x'], graph.nodes[d]['y'])
-            line = shapely.LineString([[s_x, s_y], [d_x, d_y]])
-            shifted_line = line.parallel_offset(1, side='right')
             
-            if s == node:
-                shifted_coords = shifted_line.coords[0]
-            else:
-                shifted_coords = shifted_line.coords[1]
+            try:
+                line: shapely.LineString = data['geometry']
+            except KeyError:
+                line = shapely.LineString([[graph.nodes[s]['x'], graph.nodes[s]['y']], [graph.nodes[d]['x'], graph.nodes[d]['y']]])
+            
+            shifted_line = line.parallel_offset(0.00001, side='right', join_style='mitre')
+            if shifted_line.is_empty:
+                shifted_line = line
+            
+            try:
+                if s == node:
+                    shifted_coords = shifted_line.coords[0]
+                else:
+                    shifted_coords = shifted_line.coords[-1]
+            except IndexError:
+                print(s, d, data)
+                print('IndexError:', shifted_line)
             
             if data['reversed']:
-                reversed_coords.append((shifted_coords[0], shifted_coords[1]))
+                reversed_coords.append((shifted_coords[0], shifted_coords[-1]))
             else:
-                not_reversed_coords.append((shifted_coords[0], shifted_coords[1]))
+                not_reversed_coords.append((shifted_coords[0], shifted_coords[-1]))
 
         x_reversed = np.mean([coord[0] for coord in reversed_coords])
-        y_reversed = np.mean([coord[1] for coord in reversed_coords])
+        y_reversed = np.mean([coord[-1] for coord in reversed_coords])
 
         x_not_reversed = np.mean([coord[0] for coord in not_reversed_coords])
-        y_not_reversed = np.mean([coord[1] for coord in not_reversed_coords])
+        y_not_reversed = np.mean([coord[-1] for coord in not_reversed_coords])
 
         if (len(not_reversed_coords) == 1 or len(reversed_coords) == 1) and len(street_edges) == 1:
             s, d, data = street_edges[0]
-            s_x, s_y = osm_to_gk.transform(graph.nodes[s]['x'], graph.nodes[s]['y'])
-            d_x, d_y = osm_to_gk.transform(graph.nodes[d]['x'], graph.nodes[d]['y'])
-            line = shapely.LineString([[s_x, s_y], [d_x, d_y]])
-            line = line.parallel_offset(1, side='right')
+            try:
+                line: shapely.LineString = data['geometry']
+            except KeyError:
+                s_x, s_y = (graph.nodes[s]['x'], graph.nodes[s]['y'])
+                d_x, d_y = (graph.nodes[d]['x'], graph.nodes[d]['y'])
+                line = shapely.LineString([[s_x, s_y], [d_x, d_y]])
+            shifted_line = line.parallel_offset(0.00001, side='right', join_style='mitre')
+            if shifted_line.is_empty:
+                shifted_line = line
+
             if street_edges[0] in in_edges:
-                shifted_point = line.line_interpolate_point(line.length - 2)
+                shifted_point = shifted_line.line_interpolate_point(shifted_line.length - 0.00002)
             else:
-                shifted_point = line.line_interpolate_point(-(line.length - 2))
+                shifted_point = shifted_line.line_interpolate_point(-(shifted_line.length - 0.00002))
             
             if len(not_reversed_coords) == 1:
                 x_not_reversed = shifted_point.x
@@ -185,52 +202,116 @@ def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
                 y_reversed = shifted_point.y
 
         if len(reversed_coords) > 0:
-            x_reversed, y_reversed = gk_to_osm.transform(x_reversed, y_reversed)
+            #x_reversed, y_reversed = gk_to_osm.transform(x_reversed, y_reversed)
             graph.nodes[node]['x_reversed'] = x_reversed
             graph.nodes[node]['y_reversed'] = y_reversed
         if len(not_reversed_coords) > 0:
-            x_not_reversed, y_not_reversed = gk_to_osm.transform(x_not_reversed, y_not_reversed)
+            #x_not_reversed, y_not_reversed = gk_to_osm.transform(x_not_reversed, y_not_reversed)
             graph.nodes[node]['x_not_reversed'] = x_not_reversed
             graph.nodes[node]['y_not_reversed'] = y_not_reversed
 
+    for edge in graph.edges(data=True, keys=True):
+        s, d, key, data = edge
+        try:
+            line: shapely.LineString = data['geometry']
+            line = line.parallel_offset(0.00001, side='right', join_style='mitre')
+            if line.is_empty:
+                line = data['geometry']
+
+            if data['reversed']:
+                line = list(line.coords)
+                try:
+                    line[0] = (graph.nodes[s]['x_reversed'], graph.nodes[s]['y_reversed'])
+                    line[-1] = (graph.nodes[d]['x_reversed'], graph.nodes[d]['y_reversed'])
+                except KeyError:
+                    line[0] = (graph.nodes[s]['x'], graph.nodes[s]['y'])
+                    line[-1] = (graph.nodes[d]['x'], graph.nodes[d]['y'])
+            else:
+                line = list(line.coords)
+                try:
+                    line[0] = (graph.nodes[s]['x_not_reversed'], graph.nodes[s]['y_not_reversed'])
+                    line[-1] = (graph.nodes[d]['x_not_reversed'], graph.nodes[d]['y_not_reversed'])
+                except KeyError:
+                    line[0] = (graph.nodes[s]['x'], graph.nodes[s]['y'])
+                    line[-1] = (graph.nodes[d]['x'], graph.nodes[d]['y'])
+            line = shapely.LineString(line)
+        except KeyError:
+            s, d, key, data = edge
+            try:
+                reversed = data['reversed']
+            except:
+                reversed = None
+
+            if reversed == True:
+                start = [graph.nodes[s]['y_reversed'], graph.nodes[s]['x_reversed']]
+                dest = [graph.nodes[d]['y_reversed'], graph.nodes[d]['x_reversed']]
+            if reversed == False:
+                start = [graph.nodes[s]['y_not_reversed'], graph.nodes[s]['x_not_reversed']]
+                dest = [graph.nodes[d]['y_not_reversed'], graph.nodes[d]['x_not_reversed']]
+            # nodes at intersections only have one of those attributes (*_reversed, *_not_reversed) because they are only traversed in one direction
+            if reversed is None:
+                try:
+                    start = [graph.nodes[s]['y_reversed'], graph.nodes[s]['x_reversed']]
+                except:
+                    try:
+                        start = [graph.nodes[s]['y_not_reversed'], graph.nodes[s]['x_not_reversed']]
+                    except:
+                        start = [graph.nodes[s]['y'], graph.nodes[s]['x']]
+                try:
+                    dest = [graph.nodes[d]['y_reversed'], graph.nodes[d]['x_reversed']]
+                except:
+                    try:
+                        dest = [graph.nodes[d]['y_not_reversed'], graph.nodes[d]['x_not_reversed']]
+                    except:
+                        dest = [graph.nodes[d]['y'], graph.nodes[d]['x']]
+            line = shapely.LineString([start[::-1], dest[::-1]])
+            pass
+        
+        graph.edges[s, d, key]['shifted_geometry'] = line
+
     return graph
 
-def plot_shifted_graph(graph: nx.MultiDiGraph, plot_original_graph=False, debug_marker=False) -> tuple[GeoDataFrame, GeoDataFrame, GeoDataFrame]:
+def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame, GeoDataFrame]:
     debug_marker_df = None
+
     if debug_marker:
-        debug_marker_df = {'geometry': [], 'color': [], 'size': [], 'label': []}
+        debug_marker_df = {'osmid': [], 'geometry': [], 'color': [], 'size': [], 'label': []}
     
         for node in graph.nodes:
-            debug_marker_df['geometry'].append(shapely.Point([graph.nodes[node]['y'], graph.nodes[node]['x']]))
+            debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
+            debug_marker_df['geometry'].append(shapely.Point([graph.nodes[node]['x'], graph.nodes[node]['y']]))
             debug_marker_df['color'].append(matplotlib.colors.to_hex('black'))
             debug_marker_df['size'].append(10)
             debug_marker_df['label'].append(f'{node} original')
             try:
                 x_reversed = graph.nodes[node]['x_reversed']
                 y_reversed = graph.nodes[node]['y_reversed']
-                debug_marker_df['geometry'].append(shapely.Point([y_reversed, x_reversed]))
+                debug_marker_df['geometry'].append(shapely.Point([x_reversed, y_reversed]))
                 debug_marker_df['color'].append(matplotlib.colors.to_hex('red'))
                 debug_marker_df['size'].append(10)
                 debug_marker_df['label'].append(f'{node} reversed')
+                debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
             except:
                 pass
             try:
                 x_not_reversed = graph.nodes[node]['x_not_reversed']
                 y_not_reversed = graph.nodes[node]['y_not_reversed']
-                debug_marker_df['geometry'].append(shapely.Point([y_not_reversed, x_not_reversed]))
+                debug_marker_df['geometry'].append(shapely.Point([x_not_reversed, y_not_reversed]))
                 debug_marker_df['color'].append(matplotlib.colors.to_hex('blue'))
                 debug_marker_df['size'].append(10)
                 debug_marker_df['label'].append(f'{node} not reversed')
+                debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
             except:
                 pass
+            
         debug_marker_df = GeoDataFrame(debug_marker_df, crs='EPSG:4326')
-
+    
     # plot edges
-    edges_df = {'u': [], 'v': [], 'key': [], 'geometry': [], 'color': [], 'line_width': []}
-    original_edges_df = {'v': [], 'u': [], 'key': [], 'geometry': [], 'color': [], 'line_width': []}
+    edges_df = {'u': [], 'v': [], 'key': [], 'geometry': [], 'color': [], 'line_width': [], 'tooltip': []}
 
     for edge in tqdm(graph.edges(data=True), desc='Plotting edges', unit='edges'):
         s, d, data = edge
+
         try:
             reversed = data['reversed']
         except:
@@ -238,73 +319,72 @@ def plot_shifted_graph(graph: nx.MultiDiGraph, plot_original_graph=False, debug_
 
         if reversed == True:
             color = 'red'
-            start = [graph.nodes[s]['y_reversed'], graph.nodes[s]['x_reversed']]
-            dest = [graph.nodes[d]['y_reversed'], graph.nodes[d]['x_reversed']]
         if reversed == False:
             color = 'blue'
-            start = [graph.nodes[s]['y_not_reversed'], graph.nodes[s]['x_not_reversed']]
-            dest = [graph.nodes[d]['y_not_reversed'], graph.nodes[d]['x_not_reversed']]
         # nodes at intersections only have one of those attributes (*_reversed, *_not_reversed) because they are only traversed in one direction
         if reversed is None:
             color = 'green'
-            try:
-                start = [graph.nodes[s]['y_reversed'], graph.nodes[s]['x_reversed']]
-            except:
-                try:
-                    start = [graph.nodes[s]['y_not_reversed'], graph.nodes[s]['x_not_reversed']]
-                except:
-                    start = [graph.nodes[s]['y'], graph.nodes[s]['x']]
-            try:
-                dest = [graph.nodes[d]['y_reversed'], graph.nodes[d]['x_reversed']]
-            except:
-                try:
-                    dest = [graph.nodes[d]['y_not_reversed'], graph.nodes[d]['x_not_reversed']]
-                except:
-                    dest = [graph.nodes[d]['y'], graph.nodes[d]['x']]
-        
+
         color = data['color'] if 'color' in data else color
 
         edges_df['u'].append(s)
         edges_df['v'].append(d)
         edges_df['key'].append(0)
-        edges_df['geometry'].append(shapely.LineString([start[::-1], dest[::-1]]))
+        edges_df['geometry'].append(data['shifted_geometry'])
         edges_df['color'].append(matplotlib.colors.to_hex(color))
         edges_df['line_width'].append(0.1)
-
-        # plot original edge
-        if plot_original_graph:
-            start = [graph.nodes[s]['y'], graph.nodes[s]['x']]
-            dest = [graph.nodes[d]['y'], graph.nodes[d]['x']]
-            original_edges_df['u'].append(s)
-            original_edges_df['v'].append(d)
-            original_edges_df['key'].append(0)
-            original_edges_df['geometry'].append(shapely.LineString([start[::-1], dest[::-1]]))
-            original_edges_df['color'].append(matplotlib.colors.to_hex('black'))
-            original_edges_df['line_width'].append(0.1)
+        edges_df['tooltip'].append(f'''<div style="color:white">
+                                        osmid: {data.get('osmid', None)}<br>
+                                        edge: {s} -> {d}<br>
+                                        geometry: {data['shifted_geometry']}<br>
+                                        reversed: {reversed}<br>
+                                        slope: {data.get('slope_percentage', None)}<br>
+                                        penalty: {data.get('penalty', None)}<br>
+                                        length: {data.get('length', None)}<br>
+                                        weight: {data.get('weight', None)}<br>
+                                    </div>''')
     
     edges_df = GeoDataFrame(edges_df, crs='EPSG:4326').set_index(['u', 'v', 'key'])
-    original_edges_df = GeoDataFrame(original_edges_df, crs='EPSG:4326').set_index(['u', 'v', 'key'])
 
-    return edges_df, original_edges_df, debug_marker_df
+    return edges_df, debug_marker_df
 
-def plot_graph(graph: nx.MultiDiGraph) -> GeoDataFrame:
+def plot_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame, GeoDataFrame]:
+    debug_marker_df = None
+
+    if debug_marker:
+        debug_marker_df = {'osmid': [], 'geometry': [], 'color': [], 'size': [], 'label': []}
+    
+        for node in graph.nodes:
+            debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
+            debug_marker_df['geometry'].append(shapely.Point([graph.nodes[node]['x'], graph.nodes[node]['y']]))
+            debug_marker_df['color'].append(matplotlib.colors.to_hex('black'))
+            debug_marker_df['size'].append(10)
+            debug_marker_df['label'].append(f'{node} original')
+            
+        debug_marker_df = GeoDataFrame(debug_marker_df, crs='EPSG:4326')
+    
     # plot edges
-    edges_df = {'u': [], 'v': [], 'key': [], 'geometry': [], 'color': [], 'line_width': []}
+    edges_df = {'u': [], 'v': [], 'key': [], 'geometry': [], 'color': [], 'line_width': [], 'tooltip': []}
 
     for edge in tqdm(graph.edges(data=True), desc='Plotting edges', unit='edges'):
-        s, d, _ = edge
-        start = [graph.nodes[s]['y'], graph.nodes[s]['x']]
-        dest = [graph.nodes[d]['y'], graph.nodes[d]['x']]
+        s, d, data = edge
+
+        color = data['color'] if 'color' in data else 'black'
+
         edges_df['u'].append(s)
         edges_df['v'].append(d)
         edges_df['key'].append(0)
-        edges_df['geometry'].append(shapely.LineString([start[::-1], dest[::-1]]))
-        edges_df['color'].append(matplotlib.colors.to_hex('black'))
+        edges_df['geometry'].append(data.get('geometry', None))
+        edges_df['color'].append(matplotlib.colors.to_hex(color))
         edges_df['line_width'].append(0.1)
+        edges_df['tooltip'].append(f'''<div style="color:white">
+                                        osmid: {data.get('osmid', None)}<br>
+                                        edge: {s} -> {d}<br>
+                                    </div>''')
     
     edges_df = GeoDataFrame(edges_df, crs='EPSG:4326').set_index(['u', 'v', 'key'])
 
-    return edges_df
+    return edges_df, debug_marker_df
 
 def is_tuple(s: str) -> bool:
     if type(s) != str:
