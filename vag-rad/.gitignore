@@ -46,8 +46,11 @@ tmp/
 # geopackages
 *.gpkg*
 
+# files for open source routing machine
 osrm/
 
+# files for graphhopper routing service
 graphhopper/
 
-population_data/
+# files for population data
+population_data/*.tif

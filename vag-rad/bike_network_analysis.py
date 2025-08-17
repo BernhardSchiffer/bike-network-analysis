@@ -167,7 +167,7 @@ def get_area_near_node(graph: nx.MultiDiGraph, node: int, radius: float) -> Poly
     if edges is None:
         return None
     edges = edges.to_crs(3043).buffer(50).to_crs(4326)
-    return Polygon(edges.unary_union.exterior.coords)
+    return Polygon(edges.union_all().exterior.coords)
 
 polygons = []
 for node in tqdm(list(graph.nodes)):
@@ -178,14 +178,14 @@ for node in tqdm(list(graph.nodes)):
         polygons.append(area)
 
 # %%
-overall_polygon = gpd.GeoSeries(polygons).unary_union
-gpd.GeoDataFrame(geometry=[gpd.GeoSeries(polygons).unary_union], crs=4326).explore()
+overall_polygon = gpd.GeoSeries(polygons).union_all()
+gpd.GeoDataFrame(geometry=[overall_polygon], crs=4326).explore()
 
 #%%
-bike_way_polygon = ox.graph_to_gdfs(graph, nodes=False, edges=True).to_crs(3043).buffer(30).to_crs(4326).unary_union
+bike_way_polygon = ox.graph_to_gdfs(graph, nodes=False, edges=True).to_crs(3043).buffer(30).to_crs(4326).union_all()
 gpd.GeoDataFrame(geometry=[bike_way_polygon], crs=4326).explore()
 # %%
-protected_bike_infra_coverage = gpd.GeoDataFrame(geometry=[gpd.GeoSeries([gpd.GeoSeries(polygons).unary_union, bike_way_polygon]).unary_union], crs=4326)
+protected_bike_infra_coverage = gpd.GeoDataFrame(geometry=[gpd.GeoSeries([gpd.GeoSeries(polygons).union_all(), bike_way_polygon]).union_all()], crs=4326)
 # %%
 protected_bike_infra_coverage['geometry'].values[0]
 # %%
@@ -197,7 +197,7 @@ nbg_polygon
 # %%
 protected_bike_infra_coverage.to_crs(3043).area / nbg_polygon.area * 100
 # %%
-population_src: rasterio.DatasetReader = rasterio.open('GHS_POP_E2025_GLOBE_R2023A_4326_3ss_V1_0_R4_C20.tif')
+population_src: rasterio.DatasetReader = rasterio.open('population_data/GHS_POP_E2025_GLOBE_R2023A_4326_3ss_V1_0_R4_C20.tif')
 # read all the data from the first band
 population_data = population_src.read()[0]
 
