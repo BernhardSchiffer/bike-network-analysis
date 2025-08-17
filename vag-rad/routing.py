@@ -133,8 +133,7 @@ POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 
 # %% 
 # load weighted graph from file
-graph = ox.io.load_graphml('simplified_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float, 'shifted_geometry': lambda x: shapely.from_wkt(x)})
-graph_small = ox.io.load_graphml('simplified_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float})
+graph = ox.io.load_graphml('simplified_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float, 'shifted_geometry': lambda x: shapely.from_wkt(x), 'osmid': parse_junction_osmid})
 
 # some statistics of the graph
 nodes = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
@@ -201,24 +200,24 @@ print('start calculating nearest nodes')
 start = time.time()
 x = [p.x for p in starting_positions]
 y = [p.y for p in starting_positions]
-starting_node_ids = ox.distance.nearest_nodes(graph_small, x, y)
+starting_node_ids = ox.distance.nearest_nodes(graph, x, y)
 
 x = [p.x for p in finishing_positions]
 y = [p.y for p in finishing_positions]
-finishing_node_ids = ox.distance.nearest_nodes(graph_small, x, y)
+finishing_node_ids = ox.distance.nearest_nodes(graph, x, y)
 end = time.time()
 print(f'finished calculating nearest nodes in {end - start} seconds')
 
 # calculate direct route between starting and finishing nodes
 # the lookup in the graph, i.e. in the a star algorithm, is too much overhead be more efficient than the djikstra algorithm
 def distance(a, b):
-    a = graph_small.nodes[a]
-    b = graph_small.nodes[b]
+    a = graph.nodes[a]
+    b = graph.nodes[b]
     return ox.distance.euclidean(a['y'], a['x'], b['y'], b['x'])
 
 print('start calculating routes')
 start = time.time()
-shortest_routes = ox.routing.shortest_path(graph_small, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT, weight='length')
+shortest_routes = ox.routing.shortest_path(graph, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT, weight='length')
 end = time.time()
 print(f'finished calculating routes in {end - start} seconds')
 
@@ -229,7 +228,7 @@ pickle.dump(shortest_routes, file)
 file.close()
 
 # %%
-plot_heat_map_of_edges([ s for s in shortest_routes if correct_routes(s)], graph_small).save('shortest_routes.html')
+plot_heat_map_of_edges([ s for s in shortest_routes if correct_routes(s)], graph).save('shortest_routes.html')
 
 # %%
 # calculate trips based on the new weight metric based on osm features
@@ -304,7 +303,7 @@ routes = [r for idx, r in routes.items()]
 shortest_route_lengths = []
 for route in tqdm(shortest_routes, desc='calculate length of shortest routes', unit='routes'):
     r = route_to_edge_ids(route)
-    route_length = sum([graph_small.edges[edge]['length'] for edge in r])
+    route_length = sum([graph.edges[edge]['length'] for edge in r])
     shortest_route_lengths.append(route_length)
 
 weighted_route_lengths = []
@@ -336,7 +335,7 @@ max_value = max(detour_factors)
 idx_max_value = detour_factors.index(max_value)
 
 display(plot_routes([routes[idx_max_value]], graph, with_markers=True))#.save('max_detour_factor.html')
-display(plot_routes([shortest_routes[idx_max_value]], graph_small, with_markers=True))#.save('max_detour_factor.html')
+display(plot_routes([shortest_routes[idx_max_value]], graph, with_markers=True))#.save('max_detour_factor.html')
 print(max_value)
 
 # %%
@@ -353,67 +352,7 @@ for detour_factor, shortest_route, weighted_route in zip(detour_factors, shortes
             count = count + 1
             if count >= limit:
                 break
-#%%
-wg: ig.Graph = ig.Graph.from_networkx(graph)
-# calculate betweenness centrality of all edges in graph
-upper_bound = 4500
-lower_bound = 1000
-count = 0
-ebc = [0]
-intersection_nodes = [n for n in wg.vs if n['_nx_name'] != n['osmid']]
-intersection_osmids = set([n['osmid'] for n in intersection_nodes])
 
-# get intersection nodes whome osmid is not already in the list
-nodes = []
-for node in intersection_nodes:
-    if node['osmid'] in intersection_osmids:
-        nodes.append(node)
-        intersection_osmids.remove(node['osmid'])
-
-# for every node
-print(f'start calculating edge betweenness centrality')
-start = time.time()
-for node in tqdm(nodes, desc='calculate edge betweenness centrality', unit='node'):
-    # get every node within certain range
-    #start_ego = time.time()
-    distances = wg.distances(source=node, target=intersection_nodes, weights='length')
-    dest_nodes = [i for i, d in enumerate(distances[0]) if d < upper_bound and d > lower_bound]
-    #end_ego = time.time()
-    #print(f'calculated ego graph in {end_ego - start_ego} seconds')
-
-    dest_nodes = [intersection_nodes[i] for i in dest_nodes]
-
-    #start_ebc = time.time()
-    ebc_tmp = wg.edge_betweenness(sources=[node], targets=dest_nodes, directed=True, weights="weight")
-    #end_ebc = time.time()
-    #print(f'calculated edge betweenness centrality in {end_ebc - start_ebc} seconds')
-
-    # update ebc counter
-    #ebc_update_start = time.time()
-    ebc = np.add(ebc, ebc_tmp)
-    #ebc_update_end = time.time()
-    #print(f'updated ebc counter in {ebc_update_end - ebc_update_start} seconds')
-
-    count = count + 1
-    if count >= len(nodes):
-        break
-
-end = time.time()
-print(f'calculated edge betwenness centrality in {end - start} seconds')
-# %%
-plot_edge_betweenness_centrality(graph, ebc).to_file(filename='graph.gpkg', layer='test_ebc_weight', driver='GPKG')
-
-plot_edge_betweenness_centrality(graph, ebc, expanded=True).to_file(filename='graph.gpkg', layer='test_ebc_weight_expanded', driver='GPKG')
-
-# %%
-wg: ig.Graph = ig.Graph.from_networkx(graph)
-ebc_start = time.time()
-ebc = wg.edge_betweenness(directed=True, cutoff=4500, weights="weight")
-ebc_end = time.time()
-print(f'calculated edge betweenness centrality in {ebc_end - ebc_start} seconds')
-
-# %%
-ebc
 # %%
 def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], expanded: bool = False) -> GeoDataFrame:
     cmap = plt.get_cmap('turbo')
@@ -489,6 +428,65 @@ def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], e
     columns_to_keep.extend(list(attributes.keys()))
 
     return edges_df#.reset_index(drop=True)
+
+#%%
+wg: ig.Graph = ig.Graph.from_networkx(graph)
+# calculate betweenness centrality of all edges in graph
+upper_bound = 4500
+lower_bound = 1000
+count = 0
+ebc = [0]
+intersection_nodes = [n for n in wg.vs if n['_nx_name'] != n['osmid']]
+intersection_osmids = set([n['osmid'] for n in intersection_nodes])
+
+# get intersection nodes whome osmid is not already in the list
+nodes = []
+for node in intersection_nodes:
+    if node['osmid'] in intersection_osmids:
+        nodes.append(node)
+        intersection_osmids.remove(node['osmid'])
+
+# for every node
+print(f'start calculating edge betweenness centrality')
+start = time.time()
+for node in tqdm(nodes, desc='calculate edge betweenness centrality', unit='node'):
+    # get every node within certain range
+    #start_ego = time.time()
+    distances = wg.distances(source=node, target=intersection_nodes, weights='length')
+    dest_nodes = [i for i, d in enumerate(distances[0]) if d < upper_bound and d > lower_bound]
+    #end_ego = time.time()
+    #print(f'calculated ego graph in {end_ego - start_ego} seconds')
+
+    dest_nodes = [intersection_nodes[i] for i in dest_nodes]
+
+    #start_ebc = time.time()
+    ebc_tmp = wg.edge_betweenness(sources=[node], targets=dest_nodes, directed=True, weights="weight")
+    #end_ebc = time.time()
+    #print(f'calculated edge betweenness centrality in {end_ebc - start_ebc} seconds')
+
+    # update ebc counter
+    #ebc_update_start = time.time()
+    ebc = np.add(ebc, ebc_tmp)
+    #ebc_update_end = time.time()
+    #print(f'updated ebc counter in {ebc_update_end - ebc_update_start} seconds')
+
+    count = count + 1
+    if count >= len(nodes):
+        break
+
+end = time.time()
+print(f'calculated edge betwenness centrality in {end - start} seconds')
+# %%
+plot_edge_betweenness_centrality(graph, ebc).to_file(filename='graph.gpkg', layer='ebc_weight_1000_4500', driver='GPKG')
+
+plot_edge_betweenness_centrality(graph, ebc, expanded=True).to_file(filename='graph.gpkg', layer='ebc_weight_1000_4500_expanded', driver='GPKG')
+
+# %%
+wg: ig.Graph = ig.Graph.from_networkx(graph)
+ebc_start = time.time()
+ebc = wg.edge_betweenness(directed=True, cutoff=4500, weights="weight")
+ebc_end = time.time()
+print(f'calculated edge betweenness centrality in {ebc_end - ebc_start} seconds')
 
 # %%
 plot_edge_betweenness_centrality(graph, ebc).to_file(filename='graph.gpkg', layer='ebc_weight', driver='GPKG')
@@ -610,95 +608,6 @@ plot_difference_between_edge_betweenness_and_route_count(graph, ebc, valid_route
 
 plot_difference_between_edge_betweenness_and_route_count(graph, ebc, valid_routes, expanded=True).to_file(filename='graph.gpkg', layer='usage_diff_expanded', driver='GPKG')
 
-#%%
-def transform_coordinates(coords: list[float], transformer: Transformer) -> list[float]:
-    return [transformer.transform(coord[0], coord[1]) for coord in coords]
-
-def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame, GeoDataFrame]:
-    debug_marker_df = None
-
-    if debug_marker:
-        debug_marker_df = {'osmid': [], 'geometry': [], 'color': [], 'size': [], 'label': []}
-    
-        for node in graph.nodes:
-            debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
-            debug_marker_df['geometry'].append(shapely.Point([graph.nodes[node]['x'], graph.nodes[node]['y']]))
-            debug_marker_df['color'].append(matplotlib.colors.to_hex('black'))
-            debug_marker_df['size'].append(10)
-            debug_marker_df['label'].append(f'{node} original')
-            try:
-                x_reversed = graph.nodes[node]['x_reversed']
-                y_reversed = graph.nodes[node]['y_reversed']
-                debug_marker_df['geometry'].append(shapely.Point([x_reversed, y_reversed]))
-                debug_marker_df['color'].append(matplotlib.colors.to_hex('red'))
-                debug_marker_df['size'].append(10)
-                debug_marker_df['label'].append(f'{node} reversed')
-                debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
-            except:
-                pass
-            try:
-                x_not_reversed = graph.nodes[node]['x_not_reversed']
-                y_not_reversed = graph.nodes[node]['y_not_reversed']
-                debug_marker_df['geometry'].append(shapely.Point([x_not_reversed, y_not_reversed]))
-                debug_marker_df['color'].append(matplotlib.colors.to_hex('blue'))
-                debug_marker_df['size'].append(10)
-                debug_marker_df['label'].append(f'{node} not reversed')
-                debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
-            except:
-                pass
-            
-        debug_marker_df = GeoDataFrame(debug_marker_df, crs='EPSG:4326')
-    
-    # plot edges
-    edges_df = {'u': [], 'v': [], 'key': [], 'geometry': [], 'color': [], 'line_width': [], 'tooltip': []}
-
-    for edge in tqdm(graph.edges(data=True), desc='Plotting edges', unit='edges'):
-        s, d, data = edge
-
-        try:
-            reversed = data['reversed']
-        except:
-            reversed = None
-
-        if reversed == True:
-            color = 'red'
-        if reversed == False:
-            color = 'blue'
-        # nodes at intersections only have one of those attributes (*_reversed, *_not_reversed) because they are only traversed in one direction
-        if reversed is None:
-            color = 'green'
-
-        color = data['color'] if 'color' in data else color
-
-        edges_df['u'].append(s)
-        edges_df['v'].append(d)
-        edges_df['key'].append(0)
-        edges_df['geometry'].append(data['shifted_geometry'])
-        edges_df['color'].append(matplotlib.colors.to_hex(color))
-        edges_df['line_width'].append(0.1)
-        edges_df['tooltip'].append(f'''<div style="color:white">
-                                        osmid: {data.get('osmid', None)}<br>
-                                        edge: {s} -> {d}<br>
-                                        geometry: {data['shifted_geometry']}<br>
-                                        reversed: {reversed}<br>
-                                        slope: {data.get('slope_percentage', None)}<br>
-                                        penalty: {data.get('penalty', None)}<br>
-                                        length: {data.get('length', None)}<br>
-                                        weight: {data.get('weight', None)}<br>
-                                    </div>''')
-    
-    edges_df = gpd.GeoDataFrame(edges_df, crs='EPSG:4326').set_index(['u', 'v', 'key'])
-    return edges_df, debug_marker_df
-
-edges_df, debug_marker_df = plot_shifted_graph(nx.MultiDiGraph(graph), debug_marker=True)
-debug_marker_df.to_file(filename='graph.gpkg', layer='shifted_nodes', driver='GPKG')
-edges_df.to_file(filename='graph.gpkg', layer='shifted_edges', driver='GPKG')
-
-# %%
-
-edges_df, debug_marker_df = plot_graph(nx.MultiDiGraph(graph), debug_marker=True)
-debug_marker_df.to_file(filename='graph.gpkg', layer='nodes', driver='GPKG')
-edges_df.to_file(filename='graph.gpkg', layer='edges', driver='GPKG')
 # %%
 def trasform_coordinates(coords: list[float], transformer: Transformer) -> list[float]:
     return [transformer.transform(coord[0], coord[1]) for coord in coords]
@@ -712,71 +621,5 @@ line = shapely.LineString(trasform_coordinates(list(line.coords), osm_to_gk))
 print(line)
 line = line.parallel_offset(1, side='right', resolution=1)
 print(line)
-#%%
-print(list(line.coords))
-changed_coords = list(line.coords)
-changed_coords[0] = [1.0, 1.0]
-line = shapely.LineString(changed_coords)
-print(list(line.coords))
 
 # %%
-def plot_linestring(line: shapely.LineString, color, map):
-    folium.PolyLine(locations=[(coord[1], coord[0]) for coord in line.coords], color=color, weight=2).add_to(map)
-    return map
-
-line = graph.edges[795323588, 7622258460, 0]['geometry']
-
-map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
-
-print([(coord[1], coord[0]) for coord in line.coords])
-map = plot_linestring(line, 'blue', map)
-offset_line = line.parallel_offset(0.00002, side='right', join_style='mitre')
-map = plot_linestring(offset_line, 'green', map)
-
-print(offset_line)
-
-shortened_line = line.parallel_offset(0.00002, side='right', join_style='mitre')
-end_point = shortened_line.line_interpolate_point(-(line.length - 0.00002))
-shortened_line = list(shortened_line.coords)
-shortened_line[0] = [end_point.x, end_point.y]
-shortened_line = shapely.LineString(shortened_line)
-
-print(shortened_line)
-
-map = plot_linestring(shortened_line, 'red', map)
-
-map
-
-# %%
-map = leafmap.Map(location=[49.451900, 11.076608], zoom_start=12, crs='EPSG3857')
-line = graph.edges[(391873180, (391873180, 266509723)), (391873180, 266509723)]['geometry']
-map = plot_linestring(line, 'blue', map)
-
-offset_line = line.parallel_offset(0.00002, side='right')
-map = plot_linestring(offset_line, 'green', map)
-map
-
-# %%
-def get_edge_by_osmid(graph: nx.MultiDiGraph, osmid: int) -> list[tuple[int, int]]:
-    edges = []
-    for edge in graph.edges(data=True):
-        s, d, data = edge
-        osmids = data.get('osmid', None)
-        if type(osmids) == list:
-            if osmid in osmids:
-                edges.append((s, d))
-        elif type(osmids) == int:
-            if osmids == osmid:
-                edges.append((s, d))
-        if osmids is None:
-            continue
-    return edges
-
-start = get_edge_by_osmid(graph, 135207683)[0][1]
-dest = get_edge_by_osmid(graph, 138155306)[0][0]
-
-print(start, dest)
-
-graph.edges[start, dest]
-# %%
-# count number of 

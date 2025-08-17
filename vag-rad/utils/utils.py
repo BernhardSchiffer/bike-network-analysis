@@ -309,8 +309,7 @@ def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoD
     # plot edges
     edges_df = {'u': [], 'v': [], 'key': [], 'geometry': [], 'color': [], 'line_width': [], 'tooltip': []}
 
-    for edge in tqdm(graph.edges(data=True), desc='Plotting edges', unit='edges'):
-        s, d, data = edge
+    for s, d, key, data in tqdm(graph.edges(data=True, keys=True), desc='Plotting edges', unit='edges'):
 
         try:
             reversed = data['reversed']
@@ -329,7 +328,7 @@ def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoD
 
         edges_df['u'].append(s)
         edges_df['v'].append(d)
-        edges_df['key'].append(0)
+        edges_df['key'].append(key)
         edges_df['geometry'].append(data['shifted_geometry'])
         edges_df['color'].append(matplotlib.colors.to_hex(color))
         edges_df['line_width'].append(0.1)
@@ -366,14 +365,13 @@ def plot_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame
     # plot edges
     edges_df = {'u': [], 'v': [], 'key': [], 'geometry': [], 'color': [], 'line_width': [], 'tooltip': []}
 
-    for edge in tqdm(graph.edges(data=True), desc='Plotting edges', unit='edges'):
-        s, d, data = edge
+    for s, d, key, data in tqdm(graph.edges(data=True), desc='Plotting edges', unit='edges'):
 
         color = data['color'] if 'color' in data else 'black'
 
         edges_df['u'].append(s)
         edges_df['v'].append(d)
-        edges_df['key'].append(0)
+        edges_df['key'].append(key)
         edges_df['geometry'].append(data.get('geometry', None))
         edges_df['color'].append(matplotlib.colors.to_hex(color))
         edges_df['line_width'].append(0.1)
@@ -414,33 +412,83 @@ def split_tuple(s: str) -> list[str]:
 def get_reversed_key(k: EdgeId) -> EdgeId:
     u, v, k = k
     #check if string is tuple
-    if is_tuple(u):    
+    if is_tuple(u):
         u = split_tuple(u[1:-1])
         if is_tuple(u[0]):
-            u0, u1 = split_tuple(u[0][1:-1])
-            u[0] = (int(u1), int(u0))
+            u0, u1, u2 = split_tuple(u[0][1:-1])
+            u[0] = (int(u1), int(u0), int(u2))
         else:
             u[0] = int(u[0])
         if is_tuple(u[1]):
-            u0, u1 = split_tuple(u[1][1:-1])
-            u[1] = (int(u1), int(u0))
+            u0, u1, u2 = split_tuple(u[1][1:-1])
+            u[1] = (int(u1), int(u0), int(u2))
         else:
             u[1] = int(u[1])
-        u = u[::-1]
+        u = [u[1], u[0], int(u[2])]
         u = str(tuple(u))
     if is_tuple(v):
         v = split_tuple(v[1:-1])
         if is_tuple(v[0]):
-            v0, v1 = split_tuple(v[0][1:-1])
-            v[0] = (int(v1), int(v0))
+            v0, v1, v2 = split_tuple(v[0][1:-1])
+            v[0] = (int(v1), int(v0), int(v2))
         else:
             v[0] = int(v[0])
         if is_tuple(v[1]):
-            v0, v1 = split_tuple(v[1][1:-1])
-            v[1] = (int(v1), int(v0))
+            v0, v1, v2 = split_tuple(v[1][1:-1])
+            v[1] = (int(v1), int(v0), int(v2))
         else:
             v[1] = int(v[1])
-        v = v[::-1]
+        v = [v[1], v[0], int(v[2])]
         v = str(tuple(v))
 
     return (v, u, k)
+
+def split_outside_brackets(string):
+    result = []
+    bracket_depth = 0
+    last_split = 0
+
+    for i, char in enumerate(string):
+        if char == '[':
+            bracket_depth += 1
+        elif char == ']':
+            bracket_depth -= 1
+        elif char == ',' and bracket_depth == 0:
+            result.append(string[last_split:i].strip())
+            last_split = i + 1
+
+    # Füge den letzten Teil hinzu
+    result.append(string[last_split:].strip())
+    return result
+
+assert split_outside_brackets('[12345678, [12345678, 87654321]], [12345679, 98765432]') == ['[12345678, [12345678, 87654321]]', '[12345679, 98765432]']
+
+def parse_junction_osmid(og_osmid: str | int) -> tuple[int|list[int], int|list[int]] | int:
+    if type(og_osmid) is int:
+        return og_osmid
+    if og_osmid.isdigit():
+        return int(og_osmid)
+    
+    osmid = split_outside_brackets(og_osmid[1:-1])
+    osmid_0 = osmid[0].strip()
+    osmid_1 = osmid[1].strip()
+
+    if osmid_0.isdigit():
+        osmid_0 = int(osmid_0)
+    elif osmid_0.startswith('[') and osmid_0.endswith(']'):
+        osmid_0 = osmid_0[1:-1].split(',')
+        osmid_0 = [int(x.strip()) for x in osmid_0]
+
+    if osmid_1.isdigit():
+        osmid_1 = int(osmid_1)
+    elif osmid_1.startswith('[') and osmid_1.endswith(']'):
+        osmid_1 = osmid_1[1:-1].split(',')
+        osmid_1 = [int(x.strip()) for x in osmid_1]
+
+    return (osmid_0, osmid_1)
+
+assert parse_junction_osmid('12345678') == 12345678
+assert parse_junction_osmid('(12345678, 87654321)') == (12345678, 87654321)
+assert parse_junction_osmid('(12345678, [87654321, 12345679])') == (12345678, [87654321, 12345679])
+assert parse_junction_osmid('([12345678, 87654321], 12345679)') == ([12345678, 87654321], 12345679)
+assert parse_junction_osmid('([12345678, 87654321], [12345679, 98765432])') == ([12345678, 87654321], [12345679, 98765432])

@@ -12,12 +12,12 @@ import os
 import pandas as pd
 import math
 
-def get_edge_by_osmid(graph: nx.MultiDiGraph, osmid: int) -> tuple[int, int]:
-    for edge in graph.edges(data=True):
-        s, d, data = edge
+def get_edge_by_osmid(graph: nx.MultiDiGraph, osmid: int) -> tuple[int, int, int]:
+    for edge in graph.edges(data=True, keys=True):
+        s, d, key, data = edge
         if data.get('osmid', None) == osmid:
-            return s, d
-    return None
+            return s, d, key
+    raise Exception(f'Edge with osmid {osmid} not found in graph')
 
 def get_angle_between_edges(e1: LineString, e2: LineString):
     # calculate bearing of edges
@@ -62,21 +62,21 @@ def get_turn_penalty(turn_angle: float) -> float:
     elif turn_direction == TurnDirection.U_TURN:
         return 1.00001
 
-def split_nodes(graph: nx.DiGraph) -> nx.DiGraph:
-    edge_lookup = ox.graph_to_gdfs(nx.MultiDiGraph(graph), nodes=False, edges=True)
+def split_nodes(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
+    edge_lookup = ox.graph_to_gdfs(graph, nodes=False, edges=True)
 
     # save old edge keys
-    old_edge_keys: dict[tuple[int, int], dict[str, float]] = {}
-    for u, v in graph.edges():
-        old_edge_keys[u, v] = {'old_edge_key': (u, v)}
+    old_edge_keys: dict[tuple[int, int, int], dict[str, float]] = {}
+    for u, v, k in graph.edges(keys=True):
+        old_edge_keys[u, v, k] = {'old_edge_key': (u, v, k)}
     nx.set_edge_attributes(graph, old_edge_keys)
 
     for node_id, node_data in tqdm([x for x in graph.nodes(data=True)], desc='splitting crossing nodes', total=len(graph.nodes), unit='nodes'):
-        in_edges = graph.in_edges(node_id, data=True)
-        out_edges = graph.out_edges(node_id, data=True)
+        in_edges = graph.in_edges(node_id, data=True, keys=True)
+        out_edges = graph.out_edges(node_id, data=True, keys=True)
 
-        in_osm_ids = [e[2].get("osmid") for e in in_edges]
-        out_osm_ids = [e[2].get("osmid") for e in out_edges]
+        in_osm_ids = [e[3].get("osmid") for e in in_edges]
+        out_osm_ids = [e[3].get("osmid") for e in out_edges]
         osmids = set()
         # map lists in list to tuple
         in_osm_ids = [tuple(i) if type(i) == list else i for i in in_osm_ids]
@@ -84,33 +84,27 @@ def split_nodes(graph: nx.DiGraph) -> nx.DiGraph:
         osmids.update(out_osm_ids)
         osmids.update(in_osm_ids)
 
-        # only split nodes with more than one in and out edge and only if they are not the same street
-        if len(in_edges) <= 0 or len(out_edges) <= 0 or (len(osmids) == 1):
+        # only split nodes with more than one in and out edge
+        if len(in_edges) <= 0 or len(out_edges) <= 0:
             continue
 
         # create new nodes for each out edge
         out_nodes = []
-        for o_s, o_d, o_data in out_edges:
-            graph.add_nodes_from([ ((o_s, o_d), node_data) ])
-            out_nodes.append((o_s, o_d))
-            graph.add_edges_from([ ((o_s, o_d), (o_s, o_d)[1], o_data) ])
-        
-        if node_id == 35499213:
-            print(f'node {node_id} has {len(in_edges)} in edges and {len(out_edges)} out edges')
-            print(f'in edges: {in_edges}')
-            print(f'out edges: {out_edges}')
-            print(f'out nodes: {out_nodes}')
+        for out_edge_start, out_edge_dest, out_edge_key, out_edge_data in out_edges:
+            graph.add_nodes_from([ ((out_edge_start, out_edge_dest, out_edge_key), node_data) ])
+            out_nodes.append((out_edge_start, out_edge_dest, out_edge_key))
+            graph.add_edges_from([ ((out_edge_start, out_edge_dest, out_edge_key), out_edge_dest, out_edge_data) ])
 
         # create new edges for each in edge and connect them to the out nodes
-        for in_edge_start, in_edge_dest, in_edge_data in in_edges:
+        for in_edge_start, in_edge_dest, in_edge_key, in_edge_data in in_edges:
             # create new node for each in edge
-            graph.add_nodes_from([((in_edge_start, in_edge_dest), node_data)])
+            graph.add_nodes_from([((in_edge_start, in_edge_dest, in_edge_key), node_data)])
             # create new edges to each out edge
             for out_node, out_edge in zip(out_nodes, out_edges):
-                out_edge_data = out_edge[2]
+                out_edge_data = out_edge[3]
                 # TODO calculate turn angle and set attribute if street is the same or changes
-                e1 = edge_lookup.loc[in_edge_data['old_edge_key'][0], in_edge_data['old_edge_key'][1], 0]
-                e2 = edge_lookup.loc[out_edge_data['old_edge_key'][0], out_edge_data['old_edge_key'][1], 0]
+                e1 = edge_lookup.loc[in_edge_data['old_edge_key'][0], in_edge_data['old_edge_key'][1], in_edge_data['old_edge_key'][2]]
+                e2 = edge_lookup.loc[out_edge_data['old_edge_key'][0], out_edge_data['old_edge_key'][1], out_edge_data['old_edge_key'][2]]
 
                 # skip if the edge is a u turn
                 if shapely.reverse(e1['geometry']) == e2['geometry']:
@@ -119,9 +113,9 @@ def split_nodes(graph: nx.DiGraph) -> nx.DiGraph:
                 turning_angle = get_angle_between_edges(e1['geometry'], e2['geometry'])
                 penalty = get_turn_penalty(turning_angle)
                 weight = 0.6*1000*(penalty - 1.0)
-                graph.add_edge((in_edge_start, in_edge_dest), out_node, length=0.0, weight=weight, penalty=penalty, turning_angle=turning_angle, osmid=(in_edge_data['osmid'], out_edge_data['osmid']))
+                graph.add_edge((in_edge_start, in_edge_dest, in_edge_key), out_node, length=0.0, weight=weight, penalty=penalty, turning_angle=turning_angle, osmid=(in_edge_data['osmid'], out_edge_data['osmid']))
             # add edge from previous node to new in node
-            graph.add_edges_from([((in_edge_start, in_edge_dest)[0], (in_edge_start, in_edge_dest), in_edge_data)])
+            graph.add_edges_from([(in_edge_start, (in_edge_start, in_edge_dest, in_edge_key), in_edge_data)])
         # remove old node
         graph.remove_node(node_id)
 
@@ -198,20 +192,6 @@ def is_footpath(tags: dict[str, str]) -> bool:
     is_bikepath = tags.get('bicycle', None) == 'designated'
     return is_footpath and not is_bikepath
 
-def get_edge_by_osmid(graph: nx.MultiDiGraph, osmid: int) -> tuple[int, int]:
-    for edge in graph.edges(data=True):
-        s, d, data = edge
-        osmids = data.get('osmid', None)
-        if type(osmids) == list:
-            if osmid in osmids:
-                return s, d
-        elif type(osmids) == int:
-            if osmids == osmid:
-                return s, d
-        if osmids is None:
-            continue
-    raise Exception(f'Edge with osmid {osmid} not found in graph')
-
 class GraphBuilder:
     def __init__(self):
         self.osm_to_geotiff = Transformer.from_crs("EPSG:4326", "EPSG:25832")
@@ -282,8 +262,8 @@ class GraphBuilder:
             file.close()
 
     # add paths where the street is oneway but bikes are allowed in both directions
-    def add_paths_for_bikeable_oneways(self, graph: nx.DiGraph) -> nx.DiGraph:
-        for u, v, data in tqdm(graph.edges(data=True), desc='looking for bikeable onewaystreets', total=len(graph.edges), unit='edges'):
+    def add_paths_for_bikeable_oneways(self, graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
+        for u, v, key, data in tqdm(graph.edges(data=True, keys=True), desc='looking for bikeable onewaystreets', total=len(graph.edges), unit='edges'):
             osmid = data['osmid']
             tags = {}
             if type(osmid) == list:
@@ -298,7 +278,7 @@ class GraphBuilder:
                 tags = self.edges_osm_data_lookup.loc[osmid]['tags']
             if data['oneway'] == True and (tags.get('oneway:bicycle', None) == 'no' or tags.get('cycleway', None) == 'opposite'):
                 # check if the path is also oneway for bikes
-                graph.edges[u, v]['oneway'] = False
+                graph.edges[u, v, key]['oneway'] = False
                 data_for_reversed_path = data.copy()
                 data_for_reversed_path['reversed'] = True
                 data_for_reversed_path['oneway'] = False
@@ -307,7 +287,7 @@ class GraphBuilder:
                 except:
                     pass
                 # add reversed path to graph
-                graph.add_edge(v, u, **data_for_reversed_path)
+                graph.add_edge(v, u, key, **data_for_reversed_path)
         return graph
 
     def get_elevation(self, lon, lat):
@@ -316,7 +296,7 @@ class GraphBuilder:
         return self.dat.xy(*idx), self.z[idx]
     
     # set node attributes
-    def set_node_attributes(self, graph: nx.DiGraph) -> nx.DiGraph:
+    def set_node_attributes(self, graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
         node_attributes: dict[int, dict[str, float]] = {}
 
         for osmid, data in graph.nodes(data=True):
@@ -332,7 +312,7 @@ class GraphBuilder:
 
         return graph
 
-    def set_node_elevation(self, graph: nx.DiGraph) -> nx.DiGraph:
+    def set_node_elevation(self, graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
         elevation_for_nodes: dict[int, dict[str, float]] = {}
 
         for osmid, data in graph.nodes(data=True):
@@ -347,18 +327,18 @@ class GraphBuilder:
 
         return graph
 
-    def set_edge_slope(self, graph: nx.DiGraph) -> nx.DiGraph:
+    def set_edge_slope(self, graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
         graph = self.set_node_elevation(graph)
         slope_percentages: dict[tuple[int, int], dict[str, float]] = {}
 
-        for u, v, e_data in graph.edges(data=True):
+        for u, v, key, e_data in graph.edges(data=True, keys=True):
             start_node = graph.nodes[u]
             dest_node = graph.nodes[v]
             
             hight_diff = dest_node['elevation'] - start_node['elevation']
             slope_percentage = (hight_diff / e_data['length']) * 100
 
-            slope_percentages[u, v] = {'slope_percentage': float(slope_percentage)}
+            slope_percentages[u, v, key] = {'slope_percentage': float(slope_percentage)}
             
         nx.set_edge_attributes(graph, slope_percentages)
 
@@ -429,22 +409,22 @@ class GraphBuilder:
             return math.prod(penalties)
     
     # calculate edge weights according to their osm features
-    def set_edge_weights(self, graph: nx.DiGraph) -> nx.DiGraph:
-        weights: dict[tuple[int, int], dict[str, float]] = {}
-        penalties: dict[tuple[int, int], dict[str, float]] = {}
+    def set_edge_weights(self, graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
+        weights: dict[tuple[int, int, int], dict[str, float]] = {}
+        penalties: dict[tuple[int, int, int], dict[str, float]] = {}
         problematic_osmids = []
-        for u, v, data in tqdm(graph.edges(data=True), desc='calculating edge weights', total=len(graph.edges), unit='edges'):
+        for u, v, key, data in tqdm(graph.edges(data=True, keys=True), desc='calculating edge weights', total=len(graph.edges), unit='edges'):
             if type(data['osmid']) is tuple:
                 continue
             try:
                 penalty = self.get_weight(u, v, data)
-                penalties[u,v] = {'penalty': penalty}
-                weights[u,v] = {'weight': float(data['length'] * penalty)}
+                penalties[u,v,key] = {'penalty': penalty}
+                weights[u,v,key] = {'weight': float(data['length'] * penalty)}
             except:
                 problematic_osmids.append(data['osmid'])
                 penalty = 1.0
-                penalties[u,v] = {'penalty': penalty}
-                weights[u,v] = {'weight': float(data['length'] * penalty)}
+                penalties[u,v,key] = {'penalty': penalty}
+                weights[u,v,key] = {'weight': float(data['length'] * penalty)}
 
         if len(problematic_osmids) > 0:
             print(f'found problems with {len(problematic_osmids)} edges: {problematic_osmids}')
@@ -456,7 +436,7 @@ class GraphBuilder:
 
         return graph
 
-    def enforce_restrictions(self, graph: nx.DiGraph) -> nx.DiGraph:
+    def enforce_restrictions(self, graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
         graph = graph.copy()
         # load restrictions
         self.load_osm_restrictions()

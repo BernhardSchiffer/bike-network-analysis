@@ -7,64 +7,13 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from collections import Counter
 from  utils.graph_types import *
-from utils.utils import correct_routes, route_to_edge_ids, get_reversed_key, plot_graph
+from utils.utils import correct_routes, route_to_edge_ids, get_reversed_key, plot_graph, parse_junction_osmid, plot_shifted_graph
 import pickle
 import igraph as ig
 import time
 import shapely
 from geopandas import GeoDataFrame
-from utils.graph_builder import get_turn_direction
-from utils.graph_builder import TurnDirection
-
-def split_outside_brackets(string):
-    result = []
-    bracket_depth = 0
-    last_split = 0
-
-    for i, char in enumerate(string):
-        if char == '[':
-            bracket_depth += 1
-        elif char == ']':
-            bracket_depth -= 1
-        elif char == ',' and bracket_depth == 0:
-            result.append(string[last_split:i].strip())
-            last_split = i + 1
-
-    # Füge den letzten Teil hinzu
-    result.append(string[last_split:].strip())
-    return result
-
-assert split_outside_brackets('[12345678, [12345678, 87654321]], [12345679, 98765432]') == ['[12345678, [12345678, 87654321]]', '[12345679, 98765432]']
-
-def parse_junction_osmid(og_osmid: str | int) -> tuple[int|list[int], int|list[int]] | int:
-    if type(og_osmid) is int:
-        return og_osmid
-    if og_osmid.isdigit():
-        return int(og_osmid)
-    
-    osmid = split_outside_brackets(og_osmid[1:-1])
-    osmid_0 = osmid[0].strip()
-    osmid_1 = osmid[1].strip()
-
-    if osmid_0.isdigit():
-        osmid_0 = int(osmid_0)
-    elif osmid_0.startswith('[') and osmid_0.endswith(']'):
-        osmid_0 = osmid_0[1:-1].split(',')
-        osmid_0 = [int(x.strip()) for x in osmid_0]
-
-    if osmid_1.isdigit():
-        osmid_1 = int(osmid_1)
-    elif osmid_1.startswith('[') and osmid_1.endswith(']'):
-        osmid_1 = osmid_1[1:-1].split(',')
-        osmid_1 = [int(x.strip()) for x in osmid_1]
-
-    return (osmid_0, osmid_1)
-
-assert parse_junction_osmid('12345678') == 12345678
-assert parse_junction_osmid('(12345678, 87654321)') == (12345678, 87654321)
-assert parse_junction_osmid('(12345678, [87654321, 12345679])') == (12345678, [87654321, 12345679])
-assert parse_junction_osmid('([12345678, 87654321], 12345679)') == ([12345678, 87654321], 12345679)
-assert parse_junction_osmid('([12345678, 87654321], [12345679, 98765432])') == ([12345678, 87654321], [12345679, 98765432])
+from utils.graph_builder import get_turn_direction, TurnDirection
 
 #%%
 # join all values to a singe list
@@ -93,6 +42,7 @@ def is_osmid_in_edge_osmid(edge_osmid: int | list[int] | tuple[int|list[int], in
 routing_graph =  ox.io.load_graphml('simplified_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float, 'shifted_geometry': lambda x: shapely.from_wkt(x), 'osmid': parse_junction_osmid})
 
 graph = ox.io.load_graphml('bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float, 'shifted_geometry': lambda x: shapely.from_wkt(x)})
+
 # %%
 # load calculated routes from file
 with open('calculated_routes.pickle', 'rb') as f:
@@ -102,7 +52,7 @@ routes = [r for r in routes if correct_routes(r)]
 # %%
 # fetch graph of bicycle infrastructure
 place_name = 'Nürnberg'
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-03-15T21:21:30Z"]{maxsize}'
+ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-08-16T20:21:30Z"]{maxsize}'
 network_type = 'bike'
 bike_lane_filter = [
     '["cycleway"="lane"]',
@@ -276,96 +226,7 @@ start = time.time()
 ebc = wg.edge_betweenness(directed=True, cutoff=4500, weights="weight")
 end = time.time()
 print(f'calculated edge betweenness centrality in {end - start} seconds')
-# %%
-def plot_shifted_graph(graph: nx.MultiDiGraph, plot_original_graph=False, debug_marker=False) -> tuple[GeoDataFrame, GeoDataFrame, GeoDataFrame]:
-    debug_marker_df = None
 
-    if debug_marker:
-        debug_marker_df = {'osmid': [], 'geometry': [], 'color': [], 'size': [], 'label': []}
-    
-        for node in graph.nodes:
-            debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
-            debug_marker_df['geometry'].append(shapely.Point([graph.nodes[node]['x'], graph.nodes[node]['y']]))
-            debug_marker_df['color'].append(matplotlib.colors.to_hex('black'))
-            debug_marker_df['size'].append(10)
-            debug_marker_df['label'].append(f'{node} original')
-            try:
-                x_reversed = graph.nodes[node]['x_reversed']
-                y_reversed = graph.nodes[node]['y_reversed']
-                debug_marker_df['geometry'].append(shapely.Point([x_reversed, y_reversed]))
-                debug_marker_df['color'].append(matplotlib.colors.to_hex('red'))
-                debug_marker_df['size'].append(10)
-                debug_marker_df['label'].append(f'{node} reversed')
-                debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
-            except:
-                pass
-            try:
-                x_not_reversed = graph.nodes[node]['x_not_reversed']
-                y_not_reversed = graph.nodes[node]['y_not_reversed']
-                debug_marker_df['geometry'].append(shapely.Point([x_not_reversed, y_not_reversed]))
-                debug_marker_df['color'].append(matplotlib.colors.to_hex('blue'))
-                debug_marker_df['size'].append(10)
-                debug_marker_df['label'].append(f'{node} not reversed')
-                debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
-            except:
-                pass
-            
-        debug_marker_df = GeoDataFrame(debug_marker_df, crs='EPSG:4326')
-    
-    # plot edges
-    edges_df = {'u': [], 'v': [], 'key': [], 'geometry': [], 'color': [], 'line_width': [], 'tooltip': []}
-    original_edges_df = {'v': [], 'u': [], 'key': [], 'geometry': [], 'color': [], 'line_width': []}
-
-    for edge in tqdm(graph.edges(data=True), desc='Plotting edges', unit='edges'):
-        s, d, data = edge
-
-        try:
-            reversed = data['reversed']
-        except:
-            reversed = None
-
-        if reversed == True:
-            color = 'red'
-        if reversed == False:
-            color = 'blue'
-        # nodes at intersections only have one of those attributes (*_reversed, *_not_reversed) because they are only traversed in one direction
-        if reversed is None:
-            color = 'green'
-
-        color = data['color'] if 'color' in data else color
-
-        edges_df['u'].append(s)
-        edges_df['v'].append(d)
-        edges_df['key'].append(0)
-        edges_df['geometry'].append(data['shifted_geometry'])
-        edges_df['color'].append(matplotlib.colors.to_hex(color))
-        edges_df['line_width'].append(0.1)
-        edges_df['tooltip'].append(f'''<div style="color:white">
-                                        osmid: {data.get('osmid', None)}<br>
-                                        edge: {s} -> {d}<br>
-                                        geometry: {data['shifted_geometry']}<br>
-                                        reversed: {reversed}<br>
-                                        slope: {data.get('slope_percentage', None)}<br>
-                                        penalty: {data.get('penalty', None)}<br>
-                                        length: {data.get('length', None)}<br>
-                                        weight: {data.get('weight', None)}<br>
-                                    </div>''')
-
-        # plot original edge
-        if plot_original_graph:
-            start = [graph.nodes[s]['y'], graph.nodes[s]['x']]
-            dest = [graph.nodes[d]['y'], graph.nodes[d]['x']]
-            original_edges_df['u'].append(s)
-            original_edges_df['v'].append(d)
-            original_edges_df['key'].append(0)
-            original_edges_df['geometry'].append(shapely.LineString([start[::-1], dest[::-1]]))
-            original_edges_df['color'].append(matplotlib.colors.to_hex('black'))
-            original_edges_df['line_width'].append(0.1)
-
-    edges_df = GeoDataFrame(edges_df, crs='EPSG:4326').set_index(['u', 'v', 'key'])
-    original_edges_df = GeoDataFrame(original_edges_df, crs='EPSG:4326').set_index(['u', 'v', 'key'])
-
-    return edges_df, original_edges_df, debug_marker_df
 #%%
 def plot_ebc_gap_heatmap(ebc, graph: nx.MultiDiGraph, expanded: bool = False, metric: str = 'count'):
 
@@ -415,7 +276,7 @@ def plot_ebc_gap_heatmap(ebc, graph: nx.MultiDiGraph, expanded: bool = False, me
    #        graph.remove_edge(*edge)
 
     if expanded:
-        gaps_df, _, _ = plot_shifted_graph(graph)
+        gaps_df, _ = plot_shifted_graph(graph)
     else:
         gaps_df = ox.graph_to_gdfs(graph, nodes=False, edges=True)
 
@@ -473,43 +334,10 @@ plot_ebc_gap_heatmap(ebc, routing_graph, expanded=False).to_file('graph.gpkg', l
 
 plot_ebc_gap_heatmap(ebc, routing_graph, expanded=True).to_file('graph.gpkg', layer='gaps_ebc_exanded', driver='GPKG')
 
-#plot_ebc_gap_heatmap(ebc, routing_graph, expanded=False, metric='benefit').to_file('graph.gpkg', layer='gaps_ebc_benefit', driver='GPKG')
+plot_ebc_gap_heatmap(ebc, routing_graph, expanded=False, metric='benefit').to_file('graph.gpkg', layer='gaps_ebc_benefit', driver='GPKG')
 
-#plot_ebc_gap_heatmap(ebc, routing_graph, expanded=True, metric='benefit').to_file('graph.gpkg', layer='gaps_ebc_exanded_benefit', driver='GPKG')
+plot_ebc_gap_heatmap(ebc, routing_graph, expanded=True, metric='benefit').to_file('graph.gpkg', layer='gaps_ebc_exanded_benefit', driver='GPKG')
 
-#%%
-gap_osmids: dict[int, int] = dict()
-for edge, count in zip(graph.edges, ebc):
-    if count < 10_000_000:
-        continue
-
-    edge_osmid = graph.edges[edge].get('osmid', None)
-    if type(edge_osmid) == list:
-        for osmid in edge_osmid:
-            if osmid not in osmids_with_bike_infra and osmid is not None:
-                gap_osmids[osmid] = gap_osmids.get(osmid, 0) + count
-    elif type(edge_osmid) == tuple:
-        for osmid in get_all_osmids(edge_osmid):
-            if osmid not in osmids_with_bike_infra and osmid is not None:
-                gap_osmids[osmid] = gap_osmids.get(osmid, 0) + count
-    else:
-        if edge_osmid not in osmids_with_bike_infra and edge_osmid is not None:
-            gap_osmids[edge_osmid] = gap_osmids.get(edge_osmid, 0) + count
-
-gap_osmids
-
-#%%
-nbg_graph = ox.graph_from_place(query='Nürnberg', retain_all=True, simplify=False, network_type='all')
-
-nbg_graph = ox.simplification.simplify_graph(nbg_graph, edge_attrs_differ=['osmid'])
-
-#%%
-counter = Counter()
-for edge in nbg_graph.edges:
-    edge_osmid = nbg_graph.edges[edge].get('osmid', None)
-    counter[edge_osmid] += 1
-
-counter.most_common(100)
 # %%
 # plot edge betweenness centrality
 edges_with_ebc = sorted([(x,z) for x, z in zip(wg.es, ebc)], key=lambda x: x[1], reverse=False)
