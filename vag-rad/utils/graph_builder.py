@@ -194,6 +194,8 @@ def is_footpath(tags: dict[str, str]) -> bool:
 
 class GraphBuilder:
     def __init__(self):
+        self.osm_data_dir = 'osm_data'
+        self.osm_data_file = f'{self.osm_data_dir}/mittelfranken-latest.osm.pbf'
         self.osm_to_geotiff = Transformer.from_crs("EPSG:4326", "EPSG:25832")
         self.geotiff_to_osm = Transformer.from_crs("EPSG:25832", "EPSG:4326")
         self.dat = rasterio.open('./DEM/nuernberg.tif')
@@ -203,7 +205,7 @@ class GraphBuilder:
 
     def load_osm_attributes(self):
         # load osm edge attributes from file
-        edge_lookup_filename = 'osm_edges_with_attributes.pickle'
+        edge_lookup_filename = f'{self.osm_data_dir}/osm_edges_with_attributes.pickle'
 
         if os.path.isfile(edge_lookup_filename):
             with open(edge_lookup_filename, 'rb') as f:
@@ -214,7 +216,7 @@ class GraphBuilder:
 
             edges_in_nbg = []
 
-            for w in osmium.FileProcessor('mittelfranken-latest.osm.pbf').with_locations().with_filter(osmium.filter.EmptyTagFilter()).with_filter(osmium.filter.EntityFilter(osmium.osm.WAY)).with_filter(PolygonFilter(place.geometry[0])):
+            for w in osmium.FileProcessor(self.osm_data_file).with_locations().with_filter(osmium.filter.EmptyTagFilter()).with_filter(osmium.filter.EntityFilter(osmium.osm.WAY)).with_filter(PolygonFilter(place.geometry[0])):
                 obj = {}
                 obj['osmid'] = w.id
                 tags = {}
@@ -231,7 +233,7 @@ class GraphBuilder:
             file.close()
     
     def load_osm_restrictions(self):
-        node_lookup_filename = 'osm_restrictions.pickle'
+        node_lookup_filename = f'{self.osm_data_dir}/osm_restrictions.pickle'
 
         if os.path.isfile(node_lookup_filename):
             with open(node_lookup_filename, 'rb') as f:
@@ -242,7 +244,7 @@ class GraphBuilder:
 
             restrictions_in_nbg = []
 
-            for r in osmium.FileProcessor('mittelfranken-latest.osm.pbf').with_locations().with_filter(osmium.filter.EmptyTagFilter()).with_filter(osmium.filter.EntityFilter(osmium.osm.RELATION)).with_filter(PolygonFilter(place.geometry[0])):
+            for r in osmium.FileProcessor(self.osm_data_file).with_locations().with_filter(osmium.filter.EmptyTagFilter()).with_filter(osmium.filter.EntityFilter(osmium.osm.RELATION)).with_filter(PolygonFilter(place.geometry[0])):
                 if r.tags.get('type', None) == 'restriction':
                     obj = {}
                     obj['from'] = [m for m in r.members if m.role == 'from']

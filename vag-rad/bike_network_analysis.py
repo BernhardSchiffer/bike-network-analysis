@@ -193,7 +193,6 @@ protected_bike_infra_coverage.explore()
 # %%
 nbg_polygon = ox.geocode_to_gdf('Nürnberg').to_crs(3043)['geometry']
 nbg_polygon
-# %%
 
 # %%
 protected_bike_infra_coverage.to_crs(3043).area / nbg_polygon.area * 100
@@ -237,3 +236,9 @@ gpd.GeoDataFrame(geometry=[intersection], crs=4326).explore()
 bike_way_polygon
 
 # %%
+# save bike network polygon for later use
+gpd.GeoDataFrame(geometry=[protected_bike_infra_coverage], crs=4326).to_file('protected_bike_infra_coverage.gpkg', layer='protected_bike_infra_coverage', driver='GPKG')
+
+# %%
+# read bike network polygon from file
+protected_bike_infra_coverage = gpd.read_file('protected_bike_infra_coverage.gpkg', layer='protected_bike_infra_coverage').to_crs(4326)['geometry'].values[0]

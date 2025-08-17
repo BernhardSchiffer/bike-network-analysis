@@ -35,6 +35,9 @@ scraper/download_all.sh
 # binary pyton objects i.e. pre calculated routes
 *.pickle
 
+# openstreetmap files
+*.osm.pbf
+
 *.png
 !k-modes_cost_analysis.png
 
@@ -44,3 +47,7 @@ tmp/
 *.gpkg*
 
 osrm/
+
+graphhopper/
+
+population_data/
