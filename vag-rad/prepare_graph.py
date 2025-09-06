@@ -100,24 +100,3 @@ intersection_nodes = [node for node, data in graph.nodes(data=True) if node != d
 print(f'number of intersection nodes: {len(intersection_nodes)}')
 
 # %%
-edge_osmid_to_key_lookup = ox.graph_to_gdfs(graph, nodes=False, edges=True).reset_index().set_index('osmid', drop=True)
-edge_osmid_to_key_lookup
-
-# %%
-from utils.graph_builder import get_edge_by_osmid
-
-tmp_graph = graph.copy()
-
-edge = get_edge_by_osmid(tmp_graph, (30387941, 31723300))
-print(edge)
-print()
-tmp_graph.remove_edge(*edge)
-start = edge[0]
-for e in tmp_graph.out_edges(start, keys=True):
-    print(e)
-# %%
-for e, data in graph_builder.restrictions_osm_data_lookup.iterrows():
-    print(e, data)
-    print(data['from'][0].ref)
-    break
-# %%
