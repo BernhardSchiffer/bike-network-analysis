@@ -12,7 +12,7 @@ import os
 import pandas as pd
 import math
 
-def get_edge_by_osmid(graph: nx.MultiDiGraph, osmid: int) -> tuple[int, int, int]:
+def get_edge_by_osmid(graph: nx.MultiDiGraph, osmid) -> tuple[int, int, int]:
     for edge in graph.edges(data=True, keys=True):
         s, d, key, data = edge
         if data.get('osmid', None) == osmid:
@@ -444,7 +444,9 @@ class GraphBuilder:
         self.load_osm_restrictions()
         restrictions = self.restrictions_osm_data_lookup
 
-        for _, data in restrictions.iterrows():
+        #edge_osmid_to_key_lookup = ox.graph_to_gdfs(graph, nodes=False, edges=True).reset_index().set_index('osmid', drop=True)
+
+        for _, data in tqdm(restrictions.iterrows(), desc='enforcing routing restrictions', total=len(restrictions), unit='restrictions'):
             from_way = data['from']
             to_way = data['to']
             via_nodes = data['via']
@@ -454,15 +456,13 @@ class GraphBuilder:
             match restriction_type:
                 case 'only_straight_on' | 'only_right_turn' | 'only_left_turn' | 'only_u_turn':
                     try:
-                        start = get_edge_by_osmid(graph, from_way[0].ref)[1]
-                        dest = get_edge_by_osmid(graph, to_way[0].ref)[0]
-                    except Exception as e:
+                        only_edge = get_edge_by_osmid(graph, (from_way[0].ref, to_way[0].ref))
+                    except Exception:
                         continue
-                    only_edge = (start, dest)
 
                     # get all edges that are not the only edge
                     edges_to_remove = []
-                    for edge in graph.out_edges(start):
+                    for edge in graph.out_edges(only_edge[0], keys=True):
                         if edge != only_edge:
                             edges_to_remove.append(edge)
                     for edge in edges_to_remove:
@@ -472,13 +472,12 @@ class GraphBuilder:
                             continue
                 case 'no_straight_on' | 'no_right_turn' | 'no_left_turn' | 'no_u_turn' | 'no_entry':
                     try:
-                        start = get_edge_by_osmid(graph, from_way[0].ref)[1]
-                        dest = get_edge_by_osmid(graph, to_way[0].ref)[0]
-                    except Exception as e:
+                        edge = get_edge_by_osmid(graph, (from_way[0].ref, to_way[0].ref))
+                    except Exception:
                         continue
 
                     try:
-                        graph.remove_edge(start, dest)
+                        graph.remove_edge(*edge)
                     except nx.NetworkXError:
                         continue
                 case _:

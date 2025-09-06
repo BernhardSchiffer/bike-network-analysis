@@ -439,7 +439,7 @@ ebc = [0]
 intersection_nodes = [n for n in wg.vs if n['_nx_name'] != n['osmid']]
 intersection_osmids = set([n['osmid'] for n in intersection_nodes])
 
-# get intersection nodes whome osmid is not already in the list
+# get intersection nodes whom osmid is not already in the list
 nodes = []
 for node in intersection_nodes:
     if node['osmid'] in intersection_osmids:
@@ -447,8 +447,6 @@ for node in intersection_nodes:
         intersection_osmids.remove(node['osmid'])
 
 # for every node
-print(f'start calculating edge betweenness centrality')
-start = time.time()
 for node in tqdm(nodes, desc='calculate edge betweenness centrality', unit='node'):
     # get every node within certain range
     #start_ego = time.time()
@@ -474,8 +472,6 @@ for node in tqdm(nodes, desc='calculate edge betweenness centrality', unit='node
     if count >= len(nodes):
         break
 
-end = time.time()
-print(f'calculated edge betwenness centrality in {end - start} seconds')
 # %%
 plot_edge_betweenness_centrality(graph, ebc).to_file(filename='graph.gpkg', layer='ebc_weight_1000_4500', driver='GPKG')
 

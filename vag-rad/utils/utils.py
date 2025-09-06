@@ -307,7 +307,7 @@ def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoD
         debug_marker_df = GeoDataFrame(debug_marker_df, crs='EPSG:4326')
     
     # plot edges
-    edges_df = {'u': [], 'v': [], 'key': [], 'geometry': [], 'color': [], 'line_width': [], 'tooltip': []}
+    edges_df = {'u': [], 'v': [], 'key': [], 'osmid': [], 'geometry': [], 'color': [], 'line_width': [], 'tooltip': []}
 
     for s, d, key, data in tqdm(graph.edges(data=True, keys=True), desc='Plotting edges', unit='edges'):
 
@@ -329,6 +329,7 @@ def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoD
         edges_df['u'].append(s)
         edges_df['v'].append(d)
         edges_df['key'].append(key)
+        edges_df['osmid'].append(data.get('osmid', None))
         edges_df['geometry'].append(data['shifted_geometry'])
         edges_df['color'].append(matplotlib.colors.to_hex(color))
         edges_df['line_width'].append(0.1)

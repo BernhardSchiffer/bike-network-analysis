@@ -6,8 +6,6 @@ from utils.graph_builder import GraphBuilder, split_nodes
 from utils.utils import shift_graph, plot_shifted_graph
 from tqdm import tqdm
 from shapely import LineString
-import shapely
-from utils.graph_builder import get_turn_penalty, get_angle_between_edges
 
 # %%
 # fetch graph of all streets available by bike
@@ -82,6 +80,9 @@ print('number of nodes:', len(graph.nodes))
 
 graph = graph_builder.set_edge_weights(graph)
 
+# remove unconnected nodes
+graph.remove_nodes_from(list(nx.isolates(graph)))
+
 # save graph to file
 ox.io.save_graphml(nx.MultiDiGraph(graph), filepath='simplified_bicycle_graph.graphml')
 
@@ -98,4 +99,25 @@ print('number of nodes in graph:', len(graph.nodes))
 intersection_nodes = [node for node, data in graph.nodes(data=True) if node != data['osmid']]
 print(f'number of intersection nodes: {len(intersection_nodes)}')
 
+# %%
+edge_osmid_to_key_lookup = ox.graph_to_gdfs(graph, nodes=False, edges=True).reset_index().set_index('osmid', drop=True)
+edge_osmid_to_key_lookup
+
+# %%
+from utils.graph_builder import get_edge_by_osmid
+
+tmp_graph = graph.copy()
+
+edge = get_edge_by_osmid(tmp_graph, (30387941, 31723300))
+print(edge)
+print()
+tmp_graph.remove_edge(*edge)
+start = edge[0]
+for e in tmp_graph.out_edges(start, keys=True):
+    print(e)
+# %%
+for e, data in graph_builder.restrictions_osm_data_lookup.iterrows():
+    print(e, data)
+    print(data['from'][0].ref)
+    break
 # %%
