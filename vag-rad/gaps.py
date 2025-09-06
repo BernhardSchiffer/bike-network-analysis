@@ -41,8 +41,6 @@ def is_osmid_in_edge_osmid(edge_osmid: int | list[int] | tuple[int|list[int], in
 # load graph from file
 routing_graph =  ox.io.load_graphml('simplified_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float, 'shifted_geometry': lambda x: shapely.from_wkt(x), 'osmid': parse_junction_osmid})
 
-graph = ox.io.load_graphml('bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float, 'shifted_geometry': lambda x: shapely.from_wkt(x)})
-
 # %%
 # load calculated routes from file
 with open('calculated_routes.pickle', 'rb') as f:
@@ -100,7 +98,7 @@ def get_gaps_for_route(route: Route, graph: nx.MultiDiGraph):
 gaps: list[EdgeId] = []
 not_gaps: list[EdgeId] = []
 for route in tqdm(routes, desc='finding gaps in routes', unit='route'):
-    result = get_gaps_for_route(route, graph)
+    result = get_gaps_for_route(route, routing_graph)
     gaps.extend(result[0])
     not_gaps.extend(result[1])
 
@@ -118,7 +116,7 @@ with open('gaps.pickle', 'rb') as f:
 # %%
 
 gap_counter = Counter(gaps)
-edge_benefits = ox.graph_to_gdfs(graph, nodes=False, edges=True).loc[list(set(gaps))]
+edge_benefits = ox.graph_to_gdfs(routing_graph, nodes=False, edges=True).loc[list(set(gaps))]
 
 benefits = []
 counts = []
@@ -132,7 +130,6 @@ edge_benefits = edge_benefits.assign(count=counts)
 edge_benefits
 
 # %%
-
 def plot_edge_heatmap(gaps: list[EdgeId], graph: nx.MultiDiGraph, expanded: bool = False, metric: str = 'count'):
     cmap = plt.get_cmap('Reds')
 
@@ -211,13 +208,13 @@ def plot_edge_heatmap(gaps: list[EdgeId], graph: nx.MultiDiGraph, expanded: bool
 
     return gaps_df
 
-plot_edge_heatmap(gaps, graph, expanded=False).to_file('graph.gpkg', layer='gaps', driver='GPKG')
+plot_edge_heatmap(gaps, routing_graph, expanded=False).to_file('graph.gpkg', layer='gaps', driver='GPKG')
 
-plot_edge_heatmap(gaps, graph, expanded=True).to_file('graph.gpkg', layer='gaps_exanded', driver='GPKG')
+plot_edge_heatmap(gaps, routing_graph, expanded=True).to_file('graph.gpkg', layer='gaps_exanded', driver='GPKG')
 
-plot_edge_heatmap(gaps, graph, expanded=False, metric='benefit').to_file('graph.gpkg', layer='gaps_benefit', driver='GPKG')
+plot_edge_heatmap(gaps, routing_graph, expanded=False, metric='benefit').to_file('graph.gpkg', layer='gaps_benefit', driver='GPKG')
 
-plot_edge_heatmap(gaps, graph, expanded=True, metric='benefit').to_file('graph.gpkg', layer='gaps_exanded_benefit', driver='GPKG')
+plot_edge_heatmap(gaps, routing_graph, expanded=True, metric='benefit').to_file('graph.gpkg', layer='gaps_exanded_benefit', driver='GPKG')
 
 # %%
 wg: ig.Graph = ig.Graph.from_networkx(routing_graph)
@@ -353,7 +350,7 @@ plt.show()
 #%%
 # get most important edges in the graph. X% of traffic goes over x amount if edges
 important_edges = []
-percentage_of_traffic = 0.4
+percentage_of_traffic = 0.9
 sum_of_ebc = sum([c for _, c in edges_with_ebc]) * percentage_of_traffic
 
 for edge, count in reversed(edges_with_ebc):
@@ -364,9 +361,9 @@ for edge, count in reversed(edges_with_ebc):
         print(f'found {len(important_edges)} important edges with a rest ebc of {sum_of_ebc + count}')
         break
 
-print(f'{percentage_of_traffic * 100}% of traffic goes over {len(important_edges)} edges. That are {len(important_edges) / len(edges_with_ebc) * 100}% of all edges in the graph.')
+print(f'{percentage_of_traffic * 100:.2f}% of traffic goes over {len(important_edges)} edges. That are {len(important_edges) / len(edges_with_ebc) * 100:.2f}% of all edges in the graph.')
 
-print(f'minimum edge betweenness centrality of important edges: {min([c for _, c in important_edges])}')
+print(f'minimum edge betweenness centrality of important edges: {min([c for _, c in important_edges]):.0f}')
 
 df = list()
 for edge, count in important_edges:
@@ -455,21 +452,15 @@ plt.show()
 # get important turns. turns that are above a ebc of 10_000_000
 left_turns = []
 for edge, count in zip(wg.es, ebc):
-    if type(edge['osmid']) is not int and type(edge['osmid']) is not list and count > 1_000_000:
+    if type(edge['osmid']) is not int and count > 10_000_000:
         if get_turn_direction(float(edge['turning_angle'])) == TurnDirection.LEFT:
             left_turns.append({
                 'id': edge.index,
-                'geometry': edge['geometry'],
+                'geometry': edge['shifted_geometry'],
                 'ebc': count
             })
 left_turns = GeoDataFrame(left_turns)
 left_turns.to_file('graph.gpkg', layer='left_turns', driver='GPKG')
-
-# %%
-gdf_tmp = ox.graph_to_gdfs(graph, nodes=True, edges=True)
-# %%
-print(gdf_tmp[1].total_bounds)
-print(gdf_tmp[0].total_bounds)  # get bounds of the graph
 
 # %%
 # get all edges that are gaps in the bike infrastructure and have a edge betweenness centrality of more than 10_000_000
@@ -481,13 +472,11 @@ for edge, count in zip(gap_graph.edges(data=True), ebc):
         edges_to_remove.append((s, d))
         continue
 
-    if type(data['osmid']) is list:
-        for osmid in data['osmid']:
-            if not(osmid not in osmids_with_bike_infra and count > 10_000_000):
-                edges_to_remove.append((s, d))
-    elif type(data['osmid']) is int:
+    if type(data['osmid']) is int:
         if not( data['osmid'] not in osmids_with_bike_infra and count > 10_000_000):
             edges_to_remove.append((s, d))
+    else:
+        edges_to_remove.append((s, d))
 
 for s, d in edges_to_remove:
     if gap_graph.has_edge(s, d):
@@ -496,16 +485,5 @@ for s, d in edges_to_remove:
 gap_graph.graph['crs'] = 'EPSG:4326'
 gap_graph
 ox.graph_to_gdfs(gap_graph, nodes=False, edges=True).to_file('graph.gpkg', layer='gaps_above_10_000_000', driver='GPKG')
-
-# %%
-for igraph_edge, nx_edge in zip(wg.es, routing_graph.edges(data=True)):
-    print(igraph_edge)
-    print(nx_edge)
-    break
-# %%
-gap_graph.graph['crs'] = 'EPSG:4326'
-# %%
-26756070
-'20946765', '(20946765, 960085578)'
 
 # %%
