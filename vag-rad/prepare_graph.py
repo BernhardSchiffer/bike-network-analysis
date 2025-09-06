@@ -27,7 +27,7 @@ bikeable_footpaths = '["highway"~"footway"]["bicycle"~"yes|designated|dismount"]
 bikeable_crossings = '["crossing"~"yes"]["bicycle"~"yes"]'
 
 graph = ox.graph_from_place(query=place_name, simplify=False, retain_all=True, custom_filter=[bikeable_ways, bikeable_areas, bikeable_footpaths])
-#graph = ox.graph_from_bbox((11.052788,49.455830,11.053635,49.456263), simplify=False, retain_all=True, custom_filter=[bikeable_ways, bikeable_areas, bikeable_footpaths], truncate_by_edge=True)
+
 print('number of edges in bikeable graph:', len(graph.edges))
 
 not_bikeable_ways = '["highway"~"pedestrian"]["bicycle"!~"yes"]'
@@ -97,37 +97,5 @@ nodes_df.to_file(filename='graph.gpkg', layer='routing_graph_nodes', driver='GPK
 print('number of nodes in graph:', len(graph.nodes))
 intersection_nodes = [node for node, data in graph.nodes(data=True) if node != data['osmid']]
 print(f'number of intersection nodes: {len(intersection_nodes)}')
-# %%
-for s, d, data in graph.edges(data=True):
-    if data.get('weight', None) <= 0:
-        print(f'edge {s} -> {d} has negative weight: {data["weight"]}')
-# %%
-import shapely
-from shapely import LineString
-from utils.graph_builder import get_turn_penalty
-def get_angle_between_edges(e1: LineString, e2: LineString):
-    # calculate bearing of edges
-    e1_start = e1.coords[-2]
-    e1_dest = e1.coords[-1]
-    e1_bearing = ox.bearing.calculate_bearing(e1_start[1], e1_start[0], e1_dest[1], e1_dest[0])
-    e2_start = e2.coords[0]
-    e2_dest = e2.coords[1]
-    e2_bearing = ox.bearing.calculate_bearing(e2_start[1], e2_start[0], e2_dest[1], e2_dest[0])
 
-    bearing_diff = e2_bearing - e1_bearing
-    # normalize to -180, 180
-    # left turns are negative, right turns are positive
-    return (bearing_diff+180)%360-180
-
-line_1 = shapely.from_wkt('LINESTRING (11.1060245 49.4605566, 11.1061533 49.4606054, 11.1061887 49.4606189, 11.1067644 49.460846, 11.1069229 49.4609024)')
-line_2 = shapely.from_wkt('LINESTRING (11.1069229 49.4609024, 11.1072176 49.460981)')
-line_3 = shapely.reverse(line_1)
-
-turning_angle = get_angle_between_edges(line_1, line_2)
-penalty = get_turn_penalty(turning_angle)
-weight = 0.6*1000*(penalty - 1.0)
-weight
-
-# %%
-ox.graph_to_gdfs(graph, nodes=True, edges=False).to_file('graph.gpkg', layer='routing_graph_nodes', driver='GPKG')
 # %%
