@@ -10,6 +10,7 @@ import osmium
 from utils.polygon_filter import PolygonFilter
 import os
 import pandas as pd
+import geopandas as gpd
 import math
 
 def get_edge_by_osmid(graph: nx.MultiDiGraph, osmid) -> tuple[int, int, int]:
@@ -18,6 +19,17 @@ def get_edge_by_osmid(graph: nx.MultiDiGraph, osmid) -> tuple[int, int, int]:
         if data.get('osmid', None) == osmid:
             return s, d, key
     raise Exception(f'Edge with osmid {osmid} not found in graph')
+
+def get_edge_by_osmid_indexed(lookup: gpd.GeoDataFrame, osmid: str) -> tuple[int, int, int]:
+    try:
+        result = lookup.loc[osmid]
+    except KeyError:
+        raise KeyError(f'Edge with osmid {osmid} not found in lookup')
+
+    if type(result) is gpd.GeoDataFrame or type(result) is pd.DataFrame:
+        raise Exception(f'Multiple edges with osmid {osmid} found in lookup')
+    if type(result) is gpd.GeoSeries or type(result) is pd.Series:
+        return tuple(result[['u', 'v', 'key']].values)
 
 def get_angle_between_edges(e1: LineString, e2: LineString):
     # calculate bearing of edges
@@ -444,7 +456,8 @@ class GraphBuilder:
         self.load_osm_restrictions()
         restrictions = self.restrictions_osm_data_lookup
 
-        #edge_osmid_to_key_lookup = ox.graph_to_gdfs(graph, nodes=False, edges=True).reset_index().set_index('osmid', drop=True)
+        edge_osmid_to_key_lookup = ox.graph_to_gdfs(graph, nodes=False, edges=True).reset_index().set_index('osmid', drop=True)
+        edge_osmid_to_key_lookup.index = edge_osmid_to_key_lookup.index.astype(str)
 
         for _, data in tqdm(restrictions.iterrows(), desc='enforcing routing restrictions', total=len(restrictions), unit='restrictions'):
             from_way = data['from']
@@ -452,32 +465,37 @@ class GraphBuilder:
             via_nodes = data['via']
             tags = data['tags']
             restriction_type = tags.get('restriction', None)
-            
+
             match restriction_type:
                 case 'only_straight_on' | 'only_right_turn' | 'only_left_turn' | 'only_u_turn':
                     try:
-                        only_edge = get_edge_by_osmid(graph, (from_way[0].ref, to_way[0].ref))
-                    except Exception:
+                        restricted_edge = get_edge_by_osmid_indexed(edge_osmid_to_key_lookup, str((from_way[0].ref, to_way[0].ref)))
+                    except KeyError:
                         continue
-
+                    except (IndexError, Exception) as e:
+                        print(f'Error occurred while processing restriction {data}: {e}')
+                        continue
                     # get all edges that are not the only edge
                     edges_to_remove = []
-                    for edge in graph.out_edges(only_edge[0], keys=True):
-                        if edge != only_edge:
+                    for edge in graph.out_edges(restricted_edge[0], keys=True):
+                        if edge != restricted_edge:
                             edges_to_remove.append(edge)
                     for edge in edges_to_remove:
                         try:
                             graph.remove_edge(*edge)
                         except nx.NetworkXError:
                             continue
-                case 'no_straight_on' | 'no_right_turn' | 'no_left_turn' | 'no_u_turn' | 'no_entry':
+                case 'no_straight_on' | 'no_right_turn' | 'no_left_turn':
                     try:
-                        edge = get_edge_by_osmid(graph, (from_way[0].ref, to_way[0].ref))
-                    except Exception:
+                        restricted_edge = get_edge_by_osmid_indexed(edge_osmid_to_key_lookup, str((from_way[0].ref, to_way[0].ref)))
+                    except KeyError:
+                        continue
+                    except (IndexError, Exception) as e:
+                        print(f'Error occurred while processing restriction {data}: {e}')
                         continue
 
                     try:
-                        graph.remove_edge(*edge)
+                        graph.remove_edge(*restricted_edge)
                     except nx.NetworkXError:
                         continue
                 case _:

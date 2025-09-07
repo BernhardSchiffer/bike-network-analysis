@@ -278,11 +278,6 @@ def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoD
         debug_marker_df = {'osmid': [], 'geometry': [], 'color': [], 'size': [], 'label': []}
     
         for node in graph.nodes:
-            debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
-            debug_marker_df['geometry'].append(shapely.Point([graph.nodes[node]['x'], graph.nodes[node]['y']]))
-            debug_marker_df['color'].append(matplotlib.colors.to_hex('black'))
-            debug_marker_df['size'].append(10)
-            debug_marker_df['label'].append(f'{node} original')
             try:
                 x_reversed = graph.nodes[node]['x_reversed']
                 y_reversed = graph.nodes[node]['y_reversed']
@@ -336,7 +331,6 @@ def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoD
         edges_df['tooltip'].append(f'''<div style="color:white">
                                         osmid: {data.get('osmid', None)}<br>
                                         edge: {s} -> {d}<br>
-                                        geometry: {data['shifted_geometry']}<br>
                                         reversed: {reversed}<br>
                                         slope: {data.get('slope_percentage', None)}<br>
                                         penalty: {data.get('penalty', None)}<br>
