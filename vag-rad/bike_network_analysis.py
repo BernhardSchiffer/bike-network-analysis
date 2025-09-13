@@ -122,7 +122,9 @@ routing_graph = graph_builder.set_edge_slope(routing_graph)
 
 routing_graph = graph_builder.set_edge_weights(routing_graph)
 
-ox.graph_to_gdfs(routing_graph, nodes=False, edges=True).to_file('graph.gpkg', layer='original_graph', driver='GPKG')
+nodes_df, edges_df = ox.graph_to_gdfs(routing_graph, nodes=True, edges=True)
+edges_df.to_file('graph.gpkg', layer='original_graph_edges', driver='GPKG')
+nodes_df.drop(columns=['osmid']).to_file('graph.gpkg', layer='original_graph_nodes', driver='GPKG')
 
 # fetch graph of bicycle infrastructure
 bike_lane_filter = [
@@ -257,36 +259,10 @@ plt.show()
 
 print(f'average length of component: {sum(lengths)/len(lengths)} meters')
 print(f'median length of component: {lengths[int(len(lengths)/2)]} meters')
-#%%
-# call QGIS processing algorithm for network analysis
-import subprocess
-def get_network_coverage(routing_graph: nx.MultiDiGraph, coverage_graph: nx.MultiDiGraph, travel_cost: int) -> GeoDataFrame:
-    path_to_qgis_processing = '/Applications/QGIS.app/Contents/MacOS/bin/qgis_process'
-    geopackage_file = 'tmp.gpkg'
-    result_file = 'bike_path_coverage.gpkg'
-
-    ox.graph_to_gdfs(routing_graph, nodes=False, edges=True).to_file(geopackage_file, layer='routing_graph', driver='GPKG')
-    ox.graph_to_gdfs(coverage_graph, nodes=True, edges=False).drop(columns=['osmid']).to_file(geopackage_file, layer='starting_points', driver='GPKG')
-
-    # call QGIS processing algorithm over terminal
-    result = subprocess.run([path_to_qgis_processing, 'run', 'qgis:serviceareafromlayer', 'PROJECT_PATH=/Users/bernie/Documents/mittelfranken_fahrradwege.qgz', f'INPUT={geopackage_file}|layername=routing_graph', f'START_POINTS={geopackage_file}|layername=starting_points', f'STRATEGY={0}', f'TRAVEL_COST={travel_cost}', f'OUTPUT_LINES={result_file}'], capture_output=True)
-
-    if result.returncode != 0:
-        print(f"Error occurred: {result.stderr.decode()}")
-        print(result)
-        return None
-
-    reachable_edges = gpd.read_file(result_file)
-
-    #remove temporary files
-    os.remove(geopackage_file)
-    os.remove(result_file)
-
-    return reachable_edges
 
 # %%
 # analyse the coverage of the bike network
-buffer_value = 30
+buffer_value = 50
 distance = 300
 
 try:
@@ -294,16 +270,13 @@ try:
 except Exception:
     reachable_edges = get_network_coverage(routing_graph, bicycle_infrastructure_graph, distance)
 
+unique_lines = get_unique_lines(reachable_edges['geometry'].values)
 
-unique_lines = set()
-for line in reachable_edges['geometry'].explode().values:
-    unique_lines.add(line)
+gpd.GeoDataFrame(geometry=unique_lines, crs=4326).to_file('protected_bike_infra_coverage.gpkg', layer=f'reachable_streets_{distance}', driver='GPKG')
 
-gpd.GeoDataFrame(geometry=list(unique_lines), crs=4326).to_file('protected_bike_infra_coverage.gpkg', layer=f'reachable_streets_{distance}', driver='GPKG')
+reachable_area = gpd.GeoDataFrame(geometry=unique_lines, crs=4326).to_crs(25832).buffer(buffer_value, cap_style='square').to_crs(4326).union_all()
 
-reachable_area = gpd.GeoDataFrame(geometry=list(unique_lines), crs=4326).to_crs(3043).buffer(buffer_value, cap_style='square').to_crs(4326).union_all()
-
-bike_way_polygon = ox.graph_to_gdfs(bicycle_infrastructure_graph, nodes=False, edges=True).to_crs(3043).buffer(buffer_value, cap_style='square').to_crs(4326).union_all()
+bike_way_polygon = ox.graph_to_gdfs(bicycle_infrastructure_graph, nodes=False, edges=True).to_crs(25832).buffer(buffer_value, cap_style='square').to_crs(4326).union_all()
 
 protected_bike_infra_coverage = shapely.union_all([reachable_area, bike_way_polygon])
 
@@ -345,4 +318,6 @@ print(f'The area 300 meters away from bike infrastructure covers {protected_bike
 
 # %%
 # read bike network polygon from file
-protected_bike_infra_coverage = gpd.read_file('protected_bike_infra_coverage.gpkg', layer='protected_bike_infra_coverage').to_crs(4326)['geometry'].values[0]
+protected_bike_infra_coverage = gpd.read_file('protected_bike_infra_coverage.gpkg', layer=f'protected_bike_infra_coverage_{30}').to_crs(4326)['geometry'].values[0]
+protected_bike_infra_coverage
+# %%

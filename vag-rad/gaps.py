@@ -7,13 +7,15 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from collections import Counter
 from  utils.graph_types import *
-from utils.utils import correct_routes, route_to_edge_ids, get_reversed_key, plot_graph, parse_junction_osmid, plot_shifted_graph
+from utils.utils import *
 import pickle
 import igraph as ig
 import time
 import shapely
 from geopandas import GeoDataFrame
 from utils.graph_builder import get_turn_direction, TurnDirection
+import geopandas as gpd
+import rasterio
 
 #%%
 # join all values to a singe list
@@ -40,6 +42,8 @@ def is_osmid_in_edge_osmid(edge_osmid: int | list[int] | tuple[int|list[int], in
 # %%
 # load graph from file
 routing_graph =  ox.io.load_graphml('simplified_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float, 'shifted_geometry': lambda x: shapely.from_wkt(x), 'osmid': parse_junction_osmid})
+
+bicycle_graph =  ox.io.load_graphml('bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float, 'osmid': parse_junction_osmid})
 
 # %%
 # load calculated routes from file
@@ -350,7 +354,7 @@ plt.show()
 #%%
 # get most important edges in the graph. X% of traffic goes over x amount if edges
 important_edges = []
-percentage_of_traffic = 0.9
+percentage_of_traffic = 0.4
 sum_of_ebc = sum([c for _, c in edges_with_ebc]) * percentage_of_traffic
 
 for edge, count in reversed(edges_with_ebc):
@@ -486,4 +490,241 @@ gap_graph.graph['crs'] = 'EPSG:4326'
 gap_graph
 ox.graph_to_gdfs(gap_graph, nodes=False, edges=True).to_file('graph.gpkg', layer='gaps_above_10_000_000', driver='GPKG')
 
+# %%
+# map ebc count to bicycle graph to find connected components
+max_ebc = 0
+min_ebc = 0
+
+for count, edge in zip(ebc, routing_graph.edges(data=True, keys=True)):
+    u, v, key, data = edge
+    try:
+        old_edge_key = routing_graph.edges[u, v, key]['old_edge_key']
+    except KeyError:
+        continue
+    old_u, old_v, old_key = split_tuple(old_edge_key[1:-1])
+    bicycle_graph.edges[old_u, old_v, int(old_key)]['count'] = count
+
+    osmid = data.get('osmid', None)
+    if osmid is not None and osmid not in osmids_with_bike_infra:
+        max_ebc = max(max_ebc, count)
+        min_ebc = min(min_ebc, count)
+
+for edge in bicycle_graph.edges(data=True, keys=True):
+    u, v, key, data = edge
+
+    osmid = data.get('osmid', None)
+    if osmid is not None and osmid not in osmids_with_bike_infra:
+        count = data.get('count', 0)
+        color = matplotlib.colors.to_hex(plt.get_cmap('Reds')((count - min_ebc) / (max_ebc - min_ebc)))
+    else:
+        color = 'gray'
+    bicycle_graph.edges[u, v, key]['color'] = color
+
+ox.graph_to_gdfs(bicycle_graph, nodes=False, edges=True).to_file('graph.gpkg', layer='bicycle_graph_with_ebc', driver='GPKG')
+# %%
+# add count of reversed and not reveres edge
+max_ebc = 0
+min_ebc = 0
+undirected_bicycle_graph = bicycle_graph.copy()
+for edge in undirected_bicycle_graph.edges(data=True, keys=True):
+    u, v, key, data = edge
+
+    reversed_edge = get_reversed_key((u, v, key))
+    r_u, r_v, r_key = reversed_edge
+    try:
+        count = data.get('count', 0) + undirected_bicycle_graph.edges[r_u, r_v, r_key].get('count', 0)
+    except KeyError:
+        count = data.get('count', 0)
+
+    undirected_bicycle_graph.edges[(u, v, key)]['count'] = count
+
+    osmid = data.get('osmid', None)
+    if osmid is not None and osmid not in osmids_with_bike_infra:
+        max_ebc = max(max_ebc, count)
+        min_ebc = min(min_ebc, count)
+
+# remove directed edges
+undirected_bicycle_graph = nx.to_undirected(undirected_bicycle_graph)
+
+# add color
+for edge in undirected_bicycle_graph.edges(data=True, keys=True):
+    u, v, key, data = edge
+
+    osmid = data.get('osmid', None)
+    if osmid is not None and osmid not in osmids_with_bike_infra:
+        count = data.get('count', 0)
+        color = matplotlib.colors.to_hex(plt.get_cmap('Reds')((count - min_ebc) / (max_ebc - min_ebc)))
+    else:
+        color = 'gray'
+    undirected_bicycle_graph.edges[(u, v, key)]['color'] = color
+
+ox.graph_to_gdfs(undirected_bicycle_graph, nodes=False, edges=True).to_file('graph.gpkg', layer='undirected_bicycle_graph_with_ebc', driver='GPKG')
+# %%
+gap_graph: nx.MultiGraph = undirected_bicycle_graph.copy()
+for edge in undirected_bicycle_graph.edges(data=True, keys=True):
+    u, v, key, data = edge
+
+    osmid = data.get('osmid', None)
+    count = data.get('count', 0)
+    if osmid in osmids_with_bike_infra or count < 10_000_000:
+        gap_graph.remove_edge(u, v, key)
+
+# remove isolated nodes
+isolated_nodes = list(nx.isolates(gap_graph))
+gap_graph.remove_nodes_from(isolated_nodes)
+
+gaps = nx.connected_components(gap_graph)
+gaps = list(gaps)
+print(f'found {len(gaps)} gaps in the bike infrastructure')
+
+#%%
+
+# get a polygon in the shape of a triangle
+bigger_triangle = shapely.Polygon([(0, 0), (1, 0), (0.5, 1)])
+bigger_triangle
+
+
+# get a polygon that cuts the bigger triangle in half
+polygon = shapely.Polygon([(0, 0.5), (1, 0.5), (0.5, -0.5)])
+
+difference = shapely.difference(bigger_triangle, polygon)
+print(type(difference))
+print(difference.area)
+print(difference.bounds)
+display(difference)
+# %%
+import pyproj
+from shapely.ops import transform
+class GapEvaluator:
+    def __init__(self):
+        self.coverage_distance = 300
+        self.buffer_value = 30
+        self.protected_bike_infra_polygon = gpd.read_file('protected_bike_infra_coverage.gpkg', layer=f'protected_bike_infra_coverage_{self.buffer_value}').to_crs(4326)['geometry'].values[0]
+        self.load_bicycle_routing_graph()
+        self.load_population_data()
+
+    def load_bicycle_routing_graph(self):
+        routing_graph_edges = gpd.read_file('graph.gpkg', layer='original_graph_edges').to_crs(4326).set_index(['u', 'v', 'key'])
+        routing_graph_nodes = gpd.read_file('graph.gpkg', layer='original_graph_nodes').to_crs(4326).set_index('osmid')
+        routing_graph_nodes['osmid'] = routing_graph_nodes.index
+        self.routing_graph = ox.graph_from_gdfs(routing_graph_nodes, routing_graph_edges)
+
+    def load_population_data(self):
+        self.population_src: rasterio.DatasetReader = rasterio.open('population_data/GHS_POP_E2025_GLOBE_R2023A_4326_3ss_V1_0_R4_C20.tif')
+        # read all the data from the first band
+        self.population_data = self.population_src.read()[0]
+
+    def get_area_coverage(self, graph: nx.Graph) -> tuple[shapely.Polygon, list[shapely.LineString]]:
+        reachable_edges = get_network_coverage(self.routing_graph, graph, travel_cost=300)
+        
+        unique_lines = get_unique_lines(reachable_edges['geometry'].values)
+
+        reachable_area = gpd.GeoSeries(unique_lines, crs=4326).to_crs(25832).buffer(self.buffer_value, cap_style='square').to_crs(4326).union_all()
+
+        graph_polygon = ox.graph_to_gdfs(graph, nodes=False, edges=True).to_crs(25832).buffer(self.buffer_value, cap_style='square').to_crs(4326).union_all()
+
+        graph_polygon = shapely.union_all([reachable_area, graph_polygon])
+
+        return graph_polygon, unique_lines
+
+    # calculate area coverage
+    def get_added_area_coverage(self, gap_polygon: shapely.Polygon) -> float:
+
+        epsg_4326 = pyproj.CRS('EPSG:4326')
+        epsg_25832 = pyproj.CRS('EPSG:25832')
+
+        project = pyproj.Transformer.from_crs(epsg_4326, epsg_25832, always_xy=True).transform
+
+        added_area: shapely.MultiPolygon | shapely.Polygon = shapely.difference(gap_polygon, self.protected_bike_infra_polygon)
+        added_area = transform(project, added_area)
+
+        return added_area.area
+    
+    def get_added_population(self, gap_polygon: shapely.Polygon) -> float:
+        # calculating the population in the difference polygon of gap_polygon and protected_bike_infra_polygon
+        added_area: shapely.MultiPolygon | shapely.Polygon = shapely.difference(gap_polygon, self.protected_bike_infra_polygon)
+
+        # calculate population in added area polygon
+        bbox_west = added_area.bounds[0]
+        bbox_south = added_area.bounds[1]
+        bbox_east = added_area.bounds[2]
+        bbox_north = added_area.bounds[3]
+
+        row_start ,col_start = self.population_src.index(bbox_west, bbox_north)
+        row_end ,col_end = self.population_src.index(bbox_east, bbox_south)
+
+        added_population = 0
+
+        for row in range(row_start, row_end + 1):
+            for col in range(col_start, col_end + 1):
+                polygon = shapely.Polygon([
+                    self.population_src.transform * (col, row),
+                    self.population_src.transform * (col, row + 1),
+                    self.population_src.transform * (col + 1, row + 1),
+                    self.population_src.transform * (col + 1, row)
+                ])
+                
+                intersection = polygon.intersection(added_area)
+                if not intersection.is_empty:
+                    added_population += intersection.area / polygon.area * self.population_data[row, col]
+        
+        return added_population
+
+gap_evaluator = GapEvaluator()
+#%%
+
+# calculate different metrics for every gap
+gaps_df_values = {'gap': [], 'gap_geometry': [], 'additional_coverage': [], 'additional_population_coverage': [], 'length': [], 'benefit': [], 'mean_ebc': [], 'max_ebc': [], 'min_ebc': [], 'vag_rad_usage': [], 'is_connecting_bike_infra': [], 'gap_polygon': [], 'reachable_edges': [], 'geometry': []}
+
+for g in tqdm(gaps[:100], desc='calculating gap metrics', unit='gap'):
+    gap = gap_graph.subgraph(g)
+    length = 0
+    lines = []
+    ebc_values = []
+
+    for edge in gap.edges(data=True, keys=True):
+        u, v, key, data = edge
+        length += data.get('length', 0)
+        ebc_values.append(data.get('count', 0))
+        line = data.get('geometry', None)
+        if line is not None:
+            lines.append(line)
+    gap_geometry = shapely.MultiLineString(lines)
+    max_ebc = max(ebc_values)
+    min_ebc = min(ebc_values)
+    mean_ebc = sum(ebc_values) / len(ebc_values)
+
+    gaps_df_values['gap'].append(g)
+    gaps_df_values['gap_geometry'].append(gap_geometry)
+    gap_polygon, reachable_edges = gap_evaluator.get_area_coverage(gap)
+    gaps_df_values['gap_polygon'].append(gap_polygon)
+    gaps_df_values['reachable_edges'].append(shapely.MultiLineString(reachable_edges))
+    gaps_df_values['additional_coverage'].append(gap_evaluator.get_added_area_coverage(gap_polygon))
+    gaps_df_values['additional_population_coverage'].append(gap_evaluator.get_added_population(gap_polygon))
+    gaps_df_values['length'].append(length)
+    gaps_df_values['benefit'].append(length * mean_ebc)
+    gaps_df_values['mean_ebc'].append(mean_ebc)
+    gaps_df_values['max_ebc'].append(max_ebc)
+    gaps_df_values['min_ebc'].append(min_ebc)
+    gaps_df_values['vag_rad_usage'].append(None)
+    gaps_df_values['is_connecting_bike_infra'].append(None)
+    geometry = shapely.GeometryCollection([gap_geometry, gap_polygon, shapely.MultiLineString(reachable_edges)])
+    gaps_df_values['geometry'].append(geometry)
+
+gaps_df = gpd.GeoDataFrame(gaps_df_values, geometry='geometry', crs='EPSG:4326')
+#%%
+gaps_df
+# %%
+for idx, gap in gaps_df.iterrows():
+    gap_gdf = gpd.GeoDataFrame([gap], geometry='geometry', crs='EPSG:4326')
+    gap_gdf.to_file('gaps_analysis.gpkg', layer=f'gap_{idx}', driver='GPKG')
+# %%
+# iterate over gaps and save each gap as a layer in a geopackage
+for idx, gap in gaps_df.iterrows():
+    gap_gdf = gpd.GeoDataFrame([gap], geometry='gap_geometry', crs='EPSG:4326')
+    gap_gdf.to_file('gaps_analysis.gpkg', layer=f'gap_geometry_{idx}', driver='GPKG')
+    gap_polygon_gdf = gpd.GeoDataFrame([gap], geometry='gap_polygon', crs='EPSG:4326')
+    gap_polygon_gdf.to_file('gaps_analysis.gpkg', layer=f'gap_polygon_{idx}', driver='GPKG')
+    reachable_edges_gdf = gpd.GeoDataFrame([gap], geometry='reachable_edges', crs='EPSG:4326')
+    reachable_edges_gdf.to_file('gaps_analysis.gpkg', layer=f'reachable_edges_{idx}', driver='GPKG')
 # %%

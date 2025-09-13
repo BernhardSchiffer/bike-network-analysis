@@ -1,6 +1,7 @@
 import networkx as nx
 import osmnx as ox
 from folium import PolyLine
+import geopandas as gpd
 from geopandas import GeoDataFrame
 import tarfile
 import datetime
@@ -14,6 +15,7 @@ import shapely
 from pyproj import Geod, Transformer
 from tqdm import tqdm
 import numpy as np
+import subprocess
 
 # calculate length of edges of a graph
 def get_path_length(graph: nx.MultiGraph | nx.MultiDiGraph) -> float:
@@ -336,6 +338,7 @@ def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoD
                                         penalty: {data.get('penalty', None)}<br>
                                         length: {data.get('length', None)}<br>
                                         weight: {data.get('weight', None)}<br>
+                                        turning angle: {data.get('turning_angle', None)}<br>
                                     </div>''')
     
     edges_df = GeoDataFrame(edges_df, crs='EPSG:4326').set_index(['u', 'v', 'key'])
@@ -487,3 +490,33 @@ assert parse_junction_osmid('(12345678, 87654321)') == (12345678, 87654321)
 assert parse_junction_osmid('(12345678, [87654321, 12345679])') == (12345678, [87654321, 12345679])
 assert parse_junction_osmid('([12345678, 87654321], 12345679)') == ([12345678, 87654321], 12345679)
 assert parse_junction_osmid('([12345678, 87654321], [12345679, 98765432])') == ([12345678, 87654321], [12345679, 98765432])
+
+# call QGIS processing algorithm for network analysis
+def get_network_coverage(routing_graph: nx.MultiDiGraph, coverage_graph: nx.MultiDiGraph, travel_cost: int) -> GeoDataFrame:
+    path_to_qgis_processing = '/Applications/QGIS.app/Contents/MacOS/bin/qgis_process'
+    geopackage_file = 'tmp.gpkg'
+    result_file = 'bike_path_coverage.gpkg'
+
+    ox.graph_to_gdfs(routing_graph, nodes=False, edges=True).to_file(geopackage_file, layer='routing_graph', driver='GPKG')
+    ox.graph_to_gdfs(coverage_graph, nodes=True, edges=False).drop(columns=['osmid']).to_file(geopackage_file, layer='starting_points', driver='GPKG')
+
+    # call QGIS processing algorithm over terminal
+    result = subprocess.run([path_to_qgis_processing, 'run', 'qgis:serviceareafromlayer', 'PROJECT_PATH=/Users/bernie/Documents/mittelfranken_fahrradwege.qgz', f'INPUT={geopackage_file}|layername=routing_graph', f'START_POINTS={geopackage_file}|layername=starting_points', f'STRATEGY={0}', f'TRAVEL_COST={travel_cost}', f'OUTPUT_LINES={result_file}'], capture_output=True)
+
+    if result.returncode != 0:
+        print(f"Error occurred: {result.stderr.decode()}")
+        print(result)
+        return None
+
+    reachable_edges = gpd.read_file(result_file)
+
+    #remove temporary files
+    os.remove(geopackage_file)
+    os.remove(result_file)
+
+    return reachable_edges
+
+def get_unique_lines(lines: list[shapely.MultiLineString | shapely.LineString]) -> list[shapely.LineString]:
+    reachable_edges = gpd.GeoSeries(lines, crs=4326)
+    unique_lines = set(reachable_edges.explode().values)
+    return list(unique_lines)

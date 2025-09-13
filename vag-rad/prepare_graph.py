@@ -100,3 +100,66 @@ intersection_nodes = [node for node, data in graph.nodes(data=True) if node != d
 print(f'number of intersection nodes: {len(intersection_nodes)}')
 
 # %%
+# fetch graph of all streets available by bike
+place_name = 'Nürnberg'
+# use specific overpass settings
+ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-08-16T20:21:30Z"]{maxsize}'
+
+bikeable_ways = (
+        '["highway"]["area"!~"yes"]["access"!~"private"]'
+        '["highway"!~"abandoned|bus_guideway|construction|corridor|elevator|escalator|footway|'
+        'motor|no|planned|platform|proposed|raceway|razed|steps"]'
+        '["bicycle"!~"no"]["service"!~"private"]'
+    )
+
+bikeable_areas = '["area"~"yes"]["bicycle"~"yes"]'
+bikeable_footpaths = '["highway"~"footway"]["bicycle"~"yes|designated|dismount"]'
+bikeable_crossings = '["crossing"~"yes"]["bicycle"~"yes"]'
+
+graph = ox.graph_from_place(query=place_name, simplify=False, retain_all=True, custom_filter=[bikeable_ways, bikeable_areas, bikeable_footpaths])
+
+print('number of edges in bikeable graph:', len(graph.edges))
+
+not_bikeable_ways = '["highway"~"pedestrian"]["bicycle"!~"yes"]'
+service_ways = '["highway"~"service"]["access"="no"]'
+bus_only_ways = '["highway"~"service"]["bus"="yes"]'
+trams_only_ways = '["highway"~"service"]["railway"="yes"]'
+
+not_bikeable_graph = ox.graph_from_place(query=place_name, simplify=False, retain_all=True, custom_filter=[not_bikeable_ways, service_ways, bus_only_ways, trams_only_ways])
+print('number of edges in not bikeable graph:', len(not_bikeable_graph.edges))
+
+for e in tqdm(not_bikeable_graph.edges, desc='remove not bikeable edges', total=len(not_bikeable_graph.edges), unit='edges'):
+    # remove edges that are not bikeable
+    if graph.has_edge(*e):
+        graph.remove_edge(*e)
+
+print('number of edges in bikeable graph after removing not bikeable edges:', len(graph.edges))
+
+graph = ox.simplification.simplify_graph(graph, remove_rings=False, edge_attrs_differ=['osmid'])
+
+# add geometry to straight edges that do not have a geometry
+for u, v, key, data in graph.edges(data=True, keys=True):
+    if data.get('geometry', None) is None:
+        geometry = LineString([[graph.nodes[u]['x'], graph.nodes[u]['y']], [graph.nodes[v]['x'], graph.nodes[v]['y']]])
+        graph.edges[u, v, key]['geometry'] = geometry
+
+print('number of edges in bikeable graph after simplifying:', len(graph.edges))
+
+# set node and edge attributes
+graph_builder = GraphBuilder()
+
+# add paths where the street is oneway but bikes are allowed in both directions
+edge_count_before = len(graph.edges)
+graph = graph_builder.add_paths_for_bikeable_oneways(graph)
+print(f'added {len(graph.edges) - edge_count_before} paths that are bikeable in both directions')
+
+graph = graph_builder.set_node_attributes(graph)
+graph = graph_builder.set_edge_slope(graph)
+graph = graph_builder.set_edge_weights(graph)
+
+# remove unconnected nodes
+graph.remove_nodes_from(list(nx.isolates(graph)))
+
+# save graph to file
+ox.io.save_graphml(nx.MultiDiGraph(graph), filepath='bicycle_graph.graphml')
+# %%
