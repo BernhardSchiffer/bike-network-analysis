@@ -520,3 +520,21 @@ def get_unique_lines(lines: list[shapely.MultiLineString | shapely.LineString]) 
     reachable_edges = gpd.GeoSeries(lines, crs=4326)
     unique_lines = set(reachable_edges.explode().values)
     return list(unique_lines)
+
+def is_sublist(small: list[int], big: list[int]) -> bool:
+    # Convert to string representation
+    big_str = ','.join(map(str, big))
+    small_str = ','.join(map(str, small))
+
+    res = big_str.find(small_str) != -1
+    return res
+
+def parse_old_edge_key(s: str) -> tuple[int, int, int]:
+    s = s.strip('()')
+    parts: list[int] = list()
+    str_parts = s.split(',')
+    for part in str_parts:
+        parts.append(int(part.strip()))
+    if len(parts) != 3:
+        raise ValueError(f'expected 3 parts in old_edge_key but got {len(parts)} parts')
+    return (parts[0], parts[1], parts[2])
