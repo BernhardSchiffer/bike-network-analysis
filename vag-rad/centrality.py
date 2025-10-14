@@ -188,7 +188,7 @@ import osmnx as ox
 
 bbox = [49.443729, 11.056988, 49.450753, 11.071107]
 # use specific overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-08-16T20:21:30Z"]{maxsize}'
+ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-13T20:21:02Z"]{maxsize}'
 
 bikeable_ways = (
         '["highway"]["area"!~"yes"]["access"!~"private"]'

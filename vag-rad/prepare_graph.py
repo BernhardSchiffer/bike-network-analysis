@@ -11,7 +11,7 @@ from shapely import LineString
 # fetch graph of all streets available by bike
 place_name = 'Nürnberg'
 # use specific overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-10T20:20:41Z"]{maxsize}'
+ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-13T20:21:02Z"]{maxsize}'
 
 bikeable_ways = (
         '["highway"]["area"!~"yes"]["access"!~"private"]'
@@ -107,7 +107,7 @@ print(f'number of intersection nodes: {len(intersection_nodes)}')
 # fetch graph of all streets available by bike
 place_name = 'Nürnberg'
 # use specific overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-10T20:20:41Z"]{maxsize}'
+ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-13T20:21:02Z"]{maxsize}'
 
 bikeable_ways = (
         '["highway"]["area"!~"yes"]["access"!~"private"]'

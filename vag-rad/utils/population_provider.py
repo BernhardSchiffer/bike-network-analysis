@@ -25,9 +25,9 @@ class GHSLPopulationProvider(PopulationProvider):
     def get_population_in_polygon(self, polygon: shapely.Polygon | shapely.MultiPolygon) -> float:
         # calculate population in added area polygon
         bbox_west = polygon.bounds[0]
-        bbox_north = polygon.bounds[1]
+        bbox_north = polygon.bounds[3]
         bbox_east = polygon.bounds[2]
-        bbox_south = polygon.bounds[3]
+        bbox_south = polygon.bounds[1]
 
         row_start ,col_start = self.population_src.index(bbox_west, bbox_north)
         row_end ,col_end = self.population_src.index(bbox_east, bbox_south)
@@ -36,15 +36,15 @@ class GHSLPopulationProvider(PopulationProvider):
 
         for row in range(row_start, row_end + 1):
             for col in range(col_start, col_end + 1):
-                polygon = shapely.Polygon([
+                tile = shapely.Polygon([
                     self.population_src.transform * (col, row),
                     self.population_src.transform * (col, row + 1),
                     self.population_src.transform * (col + 1, row + 1),
                     self.population_src.transform * (col + 1, row)
                 ])
-                intersection = polygon.intersection(polygon)
+                intersection = tile.intersection(polygon)
                 if not intersection.is_empty:
-                    added_population += intersection.area / polygon.area * self.population_data[row, col]
+                    added_population += intersection.area / tile.area * self.population_data[row, col]
         
         return added_population
     
@@ -281,7 +281,7 @@ class NurenbergDistrictPopulationProvider(PopulationProvider):
         result = self.api.query(f"""
                             (
                                 area['boundary'='administrative']['admin_level'='11']['name'='{district_name}']->.district;
-                                wr["building"~"(apartments|residential|yes|house|terrace)"](area.district);
+                                wr["building"~"(apartments|residential|yes|house|terrace|detached)"](area.district);
                             );
                             out body;
                             >;
@@ -314,6 +314,8 @@ class NurenbergDistrictPopulationProvider(PopulationProvider):
         # calculate population in added area polygon
         total_population = 0
         for _, row in self.population_gdf.iterrows():
+            if row['apartments_areas'] is None:
+                continue
             intersection = row['apartments_areas'].intersection(polygon)
             if not intersection.is_empty:
                 total_population += intersection.area / row['apartments_areas'].area * row['population']

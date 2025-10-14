@@ -21,6 +21,9 @@ from utils.graph_builder import GraphBuilder
 from utils.polygon_filter import PolygonFilter
 from utils.utils import *
 from IPython.display import display
+from utils.qgis_utils import get_network_coverage
+from utils.population_provider import NurenbergDistrictPopulationProvider, GHSLPopulationProvider
+from utils.service_area_provider import ServiceAreaProvider
 
 # %% 
 # evaluation of osm features in Nürnberg
@@ -72,7 +75,7 @@ sorted(bicycle_stats.most_common(len(bicycle_stats)))
 # fetch graph of all streets available by bike
 place_name = 'Nürnberg'
 # use specific overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-08-16T20:21:30Z"]{maxsize}'
+ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-13T20:21:02Z"]{maxsize}'
 
 bikeable_ways = (
         '["highway"]["area"!~"yes"]["access"!~"private"]'
@@ -181,7 +184,7 @@ current_timestamp = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=
 # %%
 place_name = 'Nürnberg'
 # use specific overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-12T11:17:32Z"]{maxsize}'
+ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-13T20:21:02Z"]{maxsize}'
 
 filters = {
     'cycleway_lane': '["cycleway"="lane"]',
@@ -274,58 +277,30 @@ print(f'median length of component: {lengths[int(len(lengths)/2)]} meters')
 
 # %%
 # analyse the coverage of the bike network
-buffer_value = 50
-distance = 300
+bicycle_graph =  ox.load_graphml('bicycle_graph.graphml', node_dtypes={'osmid': int}, edge_dtypes={'weight': float, 'penalty': float, 'slope_percentage': float, 'length': float})
 
-try:
-    reachable_edges = gpd.read_file('protected_bike_infra_coverage.gpkg', layer=f'reachable_streets_{distance}')
-except Exception:
-    reachable_edges = get_network_coverage(routing_graph, bicycle_infrastructure_graph, distance)
+service_area_provider = ServiceAreaProvider(
+    coverage_distance=300,
+    buffer_value=50,
+    routing_graph=bicycle_graph)
 
-unique_lines = get_unique_lines(reachable_edges['geometry'].values)
+protected_bike_infra_coverage, _ = service_area_provider.get_service_area(list(bicycle_infrastructure_graph.nodes))
 
-gpd.GeoDataFrame(geometry=unique_lines, crs=4326).to_file('protected_bike_infra_coverage.gpkg', layer=f'reachable_streets_{distance}', driver='GPKG')
+protected_bike_infra_coverage
 
-reachable_area = gpd.GeoDataFrame(geometry=unique_lines, crs=4326).to_crs(25832).buffer(buffer_value, cap_style='square').to_crs(4326).union_all()
-
-bike_way_polygon = ox.graph_to_gdfs(bicycle_infrastructure_graph, nodes=False, edges=True).to_crs(25832).buffer(buffer_value, cap_style='square').to_crs(4326).union_all()
-
-protected_bike_infra_coverage = shapely.union_all([reachable_area, bike_way_polygon])
-
-# save bike network polygon for later use
-gpd.GeoDataFrame(geometry=[protected_bike_infra_coverage], crs=4326).to_file('protected_bike_infra_coverage.gpkg', layer=f'protected_bike_infra_coverage_{buffer_value}', driver='GPKG')
 # %%
 nbg_place = ox.geocode_to_gdf('Nürnberg')
 nbg_polygon = nbg_place['geometry'].values[0]
 
-population_src: rasterio.DatasetReader = rasterio.open('population_data/GHS_POP_E2025_GLOBE_R2023A_4326_3ss_V1_0_R4_C20.tif')
-# read all the data from the first band
-population_data = population_src.read()[0]
+population_provider = GHSLPopulationProvider()
 
-row_start ,col_start = population_src.index(nbg_place['bbox_west'], nbg_place['bbox_north'])
-row_end ,col_end = population_src.index(nbg_place['bbox_east'], nbg_place['bbox_south'])
+nbg_total_population = population_provider.get_population_in_polygon(nbg_polygon)
 
-total_population = 0
-population_near_bike_infra = 0
+population_near_bike_infra = population_provider.get_population_in_polygon(protected_bike_infra_coverage)
 
-for row in range(row_start, row_end + 1):
-    for col in range(col_start, col_end + 1):
-        polygon = Polygon([
-            population_src.transform * (col, row),
-            population_src.transform * (col, row + 1),
-            population_src.transform * (col + 1, row + 1),
-            population_src.transform * (col + 1, row)
-        ])
-        if nbg_polygon.contains(polygon):
-            total_population += population_data[row, col]
-
-            intersection = polygon.intersection(protected_bike_infra_coverage)
-            if not intersection.is_empty:
-                population_near_bike_infra += intersection.area / polygon.area * population_data[row, col]
-
-print(f'Total population in Nürnberg: {total_population:.0f}')
+print(f'Total population in Nürnberg: {nbg_total_population:.0f}')
 print(f'Population near protected bike infrastructure: {population_near_bike_infra:.0f}')
-print(f'Population near protected bike infrastructure: {population_near_bike_infra / total_population * 100:.2f}%')
+print(f'Population near protected bike infrastructure: {population_near_bike_infra / nbg_total_population * 100:.2f}%')
 print(f'The area 300 meters away from bike infrastructure covers {protected_bike_infra_coverage.area / nbg_polygon.area * 100:.2f}% of Nürnberg')
 
 # %%

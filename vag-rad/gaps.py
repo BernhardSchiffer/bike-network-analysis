@@ -58,7 +58,7 @@ routes = [r for r in routes if correct_routes(r)]
 # %%
 # fetch graph of bicycle infrastructure
 place_name = 'Nürnberg'
-osmnx.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-06T20:21:05Z"]{maxsize}'
+osmnx.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-13T20:21:02Z"]{maxsize}'
 network_type = 'bike'
 bike_lane_filter = [
     '["cycleway"="lane"]',
@@ -522,7 +522,7 @@ population_provider = GHSLPopulationProvider()
 
 service_area_provider = ServiceAreaProvider(
     coverage_distance=300,
-    buffer_value=30,
+    buffer_value=50,
     routing_graph=bicycle_graph)
 
 gap_evaluator = GapEvaluator(
