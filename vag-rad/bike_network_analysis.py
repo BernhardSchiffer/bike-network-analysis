@@ -1,13 +1,16 @@
 # %% 
 # imports
-import osmium.filter
-import osmium.osm
 import osmnx as ox
+from osmnx.simplification import simplify_graph
 import networkx as nx
 import folium
 import matplotlib
+from matplotlib.cm import get_cmap
 import matplotlib.pyplot as plt
 import osmium
+from osmium import FileProcessor
+from osmium.filter import EntityFilter, EmptyTagFilter
+from osmium.osm import WAY
 from collections import Counter
 import geopandas as gpd
 from shapely import LineString
@@ -17,16 +20,17 @@ import rasterio
 from utils.graph_builder import GraphBuilder
 from utils.polygon_filter import PolygonFilter
 from utils.utils import *
+from IPython.display import display
 
 # %% 
 # evaluation of osm features in Nürnberg
 print("Total number of objects in Mittelfranken:", sum(1 for o in osmium.FileProcessor('mittelfranken-latest.osm.pbf')))
 
-print("Of which are ways with tags:", sum(1 for o in osmium.FileProcessor('mittelfranken-latest.osm.pbf').with_filter(osmium.filter.EmptyTagFilter()).with_filter(osmium.filter.EntityFilter(osmium.osm.WAY))))
+print("Of which are ways with tags:", sum(1 for o in FileProcessor('mittelfranken-latest.osm.pbf').with_filter(EmptyTagFilter()).with_filter(EntityFilter(WAY))))
 
 place = ox.geocode_to_gdf('Nürnberg')
 print("Of which are ways within Nürnberg:",
-      sum(1 for o in osmium.FileProcessor('mittelfranken-latest.osm.pbf').with_locations().with_filter(osmium.filter.EmptyTagFilter()).with_filter(osmium.filter.EntityFilter(osmium.osm.WAY)).with_filter(PolygonFilter(place.geometry[0]))))
+      sum(1 for o in FileProcessor('mittelfranken-latest.osm.pbf').with_locations().with_filter(EmptyTagFilter()).with_filter(EntityFilter(WAY)).with_filter(PolygonFilter(place.geometry[0]))))
 
 # %%
 # get all osm tags of ways in Nürnberg
@@ -35,7 +39,7 @@ stats = Counter()
 
 edges_in_nbg = []
 
-for w in osmium.FileProcessor('mittelfranken-latest.osm.pbf').with_locations().with_filter(osmium.filter.EmptyTagFilter()).with_filter(osmium.filter.EntityFilter(osmium.osm.WAY)).with_filter(PolygonFilter(place.geometry[0])):
+for w in FileProcessor('mittelfranken-latest.osm.pbf').with_locations().with_filter(EmptyTagFilter()).with_filter(EntityFilter(WAY)).with_filter(PolygonFilter(place.geometry[0])):
     for k, v in w.tags:
         stats.update([(k, v)])
 
@@ -99,7 +103,7 @@ for e in tqdm(not_bikeable_graph.edges, desc='remove not bikeable edges', total=
 
 print('number of edges in bikeable graph after removing not bikeable edges:', len(routing_graph.edges))
 
-routing_graph = ox.simplification.simplify_graph(routing_graph, remove_rings=False, edge_attrs_differ=['osmid'])
+routing_graph = simplify_graph(routing_graph, remove_rings=False, edge_attrs_differ=['osmid'])
 
 # add geometry to straight edges that do not have a geometry
 for u, v, key, data in routing_graph.edges(data=True, keys=True):
@@ -171,23 +175,32 @@ ox.graph_to_gdfs(bicycle_infrastructure_graph, nodes=True, edges=False).drop(col
 ox.graph_to_gdfs(bicycle_infrastructure_graph, nodes=False, edges=True).to_file('graph.gpkg', layer='bicycle_infrastructure', driver='GPKG')
 
 # %%
+import datetime
+# get utc timestamp in iso format
+current_timestamp = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(timespec='seconds') + 'Z'
+# %%
 place_name = 'Nürnberg'
 # use specific overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-08-16T20:21:30Z"]{maxsize}'
+ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-12T11:17:32Z"]{maxsize}'
 
 filters = {
     'cycleway_lane': '["cycleway"="lane"]',
     'cycleway:right_lane': '["cycleway:right"="lane"]',
     'cycleway:left_lane': '["cycleway:left"="lane"]',
     'cycleway:both_lane': '["cycleway:both"="lane"]',
-    'cycleway_opposite': '["cycleway"="opposite"]',
     'cycleway_track': '["cycleway"="track"]',
     'cycleway:right_track': '["cycleway:right"="track"]',
     'cycleway:left_track': '["cycleway:left"="track"]',
     'cycleway:both_track': '["cycleway:both"="track"]',
     'bicycle_designated': '["bicycle"="designated"]',
     'highway_cycleway': '["highway"="cycleway"]',
-    'bicycle_road': '["bicycle_road"="yes"]'
+    'bicycle_road': '["bicycle_road"="yes"]',
+    'sidewalk_bicycle': [
+        '["foot"="designated"]["bicycle"="yes"]',
+        '["sidewalk:right:foot"="designated"]["sidewalk:right:bicycle"="yes"]',
+        '["sidewalk:left:foot"="designated"]["sidewalk:left:bicycle"="yes"]',
+        '["sidewalk:both:foot"="designated"]["sidewalk:both:bicycle"="yes"]'
+    ]
 }
 
 for filter in tqdm(filters.items(), desc="Fetching OSM data"):
@@ -222,13 +235,12 @@ sorted_components_by_length = sorted(list_of_components, key=lambda d: d['length
 
 # %% 
 # plot all connected components on one map
-cmap = matplotlib.cm.get_cmap('tab10')
+cmap = get_cmap('tab10')
 map = folium.Map(location=[49.451900, 11.076608], zoom_start=11, crs='EPSG3857')
 
 for idx, c in enumerate(sorted_components_by_length):
     color = matplotlib.colors.to_hex(cmap(idx%10))
-    plot_graph(c['graph'], map=map, color=color)
-
+    #plot_graph(c['graph'], map=map, color=color)
 map
 
 # %% 
@@ -320,4 +332,47 @@ print(f'The area 300 meters away from bike infrastructure covers {protected_bike
 # read bike network polygon from file
 protected_bike_infra_coverage = gpd.read_file('protected_bike_infra_coverage.gpkg', layer=f'protected_bike_infra_coverage_{30}').to_crs(4326)['geometry'].values[0]
 protected_bike_infra_coverage
+# %%
+# plot the distribution of the length of protected bike infrastructure
+bike_lane_filter = [
+    '["cycleway"="lane"]',
+    '["cycleway:right"="lane"]',
+    '["cycleway:left"="lane"]',
+    '["cycleway:both"="lane"]'
+]
+bike_path_filter = [
+    '["bicycle"="designated"]',
+    '["highway"="cycleway"]',
+    '["cycleway"="track"]',
+    '["cycleway:right"="track"]',
+    '["cycleway:left"="track"]',
+    '["cycleway:both"="track"]'
+]
+bike_road_filter = [
+    '["bicycle_road"="yes"]'
+]
+custom_filter = bike_path_filter
+tmp = ox.graph_from_place(query='Nürnberg', retain_all=True, custom_filter=custom_filter, simplify=True)
+components = nx.connected_components(tmp.to_undirected())
+
+length_of_components = [get_path_length(tmp.subgraph(c)) for c in components]
+
+boxplt = plt.boxplot(length_of_components)
+plt.title('length of protected bike infrastructure components')
+plt.ylabel('length in meters')
+plt.xticks([1], ['protected bike infrastructure'])
+# show the plot to a y value of 2000
+plt.ylim(0, 2000)
+plt.show()
+
+print(boxplt['boxes'][0].get_ydata())
+
+print(f'average length of component: {np.mean(length_of_components)} meters')
+print(f'median length of component: {np.median(length_of_components)} meters')
+print(f'shortest component: {min(length_of_components)} meters')
+print(f'longest component: {max(length_of_components)} meters')
+percentailes = [5, 10, 20, 30]
+for p in percentailes:
+    print(f'{p}th percentile: {np.percentile(length_of_components, p)} meters')
+
 # %%

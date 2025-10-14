@@ -11,6 +11,7 @@ from utils.graph_types import *
 import leafmap.foliumap as leafmap
 import typing
 import matplotlib
+import matplotlib.colors
 import shapely
 from pyproj import Geod, Transformer
 from tqdm import tqdm
@@ -41,13 +42,10 @@ def plot_graph_on_map(
     return map
 
 def get_list_of_edges(osmids: list[str], df: GeoDataFrame) -> GeoDataFrame:
-    merged_df: GeoDataFrame = None
+    merged_df: GeoDataFrame = gpd.GeoDataFrame()
     for osmid in osmids:
         tmp = df.loc[df['osmid'] == osmid]
-        if merged_df is not None:
-            merged_df.add(tmp)
-        else:
-            merged_df = tmp
+        merged_df.add(tmp)
     return merged_df
 
 # read files from archives
@@ -93,7 +91,7 @@ def a_star(
 ) -> Route | None:
     try:
         return list(nx.astar_path(graph, orig, dest, heuristic=heuristic, weight=weight))
-    except nx.exception.NetworkXNoPath:
+    except nx.NetworkXNoPath:
         return None
 
 def shortest_path_a_star(
@@ -124,7 +122,7 @@ def get_arrow_head(start: list[float], dest: list[float], color: str) -> leafmap
     arrow_pos = [arrow_pos.coords[0][0], arrow_pos.coords[0][1]]
     return leafmap.folium.RegularPolygonMarker(location=arrow_pos, color=color, fill=True, fill_color=color, fill_opacity=1, number_of_sides=3, rotation=rot, radius=5)
 
-def transform_coordinates(coords: list[float], transformer: Transformer) -> list[float]:
+def transform_coordinates(coords: list[list[float]], transformer: Transformer) -> list[float]:
     return [transformer.transform(coord[0], coord[1]) for coord in coords]
 
 def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
@@ -212,8 +210,7 @@ def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
             graph.nodes[node]['x_not_reversed'] = x_not_reversed
             graph.nodes[node]['y_not_reversed'] = y_not_reversed
 
-    for edge in graph.edges(data=True, keys=True):
-        s, d, key, data = edge
+    for s, d, key, data in graph.edges(data=True, keys=True):
         try:
             line: shapely.LineString = data['geometry']
             line = line.parallel_offset(0.00001, side='right', join_style='mitre')
@@ -238,7 +235,6 @@ def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
                     line[-1] = (graph.nodes[d]['x'], graph.nodes[d]['y'])
             line = shapely.LineString(line)
         except KeyError:
-            s, d, key, data = edge
             try:
                 reversed = data['reversed']
             except:
@@ -273,7 +269,7 @@ def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
 
     return graph
 
-def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame, GeoDataFrame]:
+def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame, GeoDataFrame | None]:
     debug_marker_df = None
 
     if debug_marker:
@@ -339,13 +335,14 @@ def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoD
                                         length: {data.get('length', None)}<br>
                                         weight: {data.get('weight', None)}<br>
                                         turning angle: {data.get('turning_angle', None)}<br>
+                                        applied filters: {data.get('applied_filters', None)}<br>
                                     </div>''')
     
     edges_df = GeoDataFrame(edges_df, crs='EPSG:4326').set_index(['u', 'v', 'key'])
 
     return edges_df, debug_marker_df
 
-def plot_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame, GeoDataFrame]:
+def plot_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame, GeoDataFrame | None]:
     debug_marker_df = None
 
     if debug_marker:
@@ -363,7 +360,7 @@ def plot_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame
     # plot edges
     edges_df = {'u': [], 'v': [], 'key': [], 'geometry': [], 'color': [], 'line_width': [], 'tooltip': []}
 
-    for s, d, key, data in tqdm(graph.edges(data=True), desc='Plotting edges', unit='edges'):
+    for s, d, key, data in tqdm(graph.edges(data=True, keys=True), desc='Plotting edges', unit='edges'):
 
         color = data['color'] if 'color' in data else 'black'
 
@@ -504,9 +501,7 @@ def get_network_coverage(routing_graph: nx.MultiDiGraph, coverage_graph: nx.Mult
     result = subprocess.run([path_to_qgis_processing, 'run', 'qgis:serviceareafromlayer', 'PROJECT_PATH=/Users/bernie/Documents/mittelfranken_fahrradwege.qgz', f'INPUT={geopackage_file}|layername=routing_graph', f'START_POINTS={geopackage_file}|layername=starting_points', f'STRATEGY={0}', f'TRAVEL_COST={travel_cost}', f'OUTPUT_LINES={result_file}'], capture_output=True)
 
     if result.returncode != 0:
-        print(f"Error occurred: {result.stderr.decode()}")
-        print(result)
-        return None
+        raise RuntimeError(f"Error occurred: {result.stderr.decode()} - {result}")
 
     reachable_edges = gpd.read_file(result_file)
 
@@ -521,7 +516,7 @@ def get_unique_lines(lines: list[shapely.MultiLineString | shapely.LineString]) 
     unique_lines = set(reachable_edges.explode().values)
     return list(unique_lines)
 
-def is_sublist(small: list[int], big: list[int]) -> bool:
+def is_sublist(small: list, big: list) -> bool:
     # Convert to string representation
     big_str = ','.join(map(str, big))
     small_str = ','.join(map(str, small))

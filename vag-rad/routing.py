@@ -1,8 +1,11 @@
 # %%
 # imports 
 import osmnx as ox
+import osmnx.distance
+import osmnx.routing
 import networkx as nx
 import matplotlib
+import matplotlib.colors
 import matplotlib.pyplot as plt
 import psycopg2
 import os
@@ -19,6 +22,7 @@ import igraph as ig
 import leafmap.foliumap as leafmap
 from tqdm import tqdm
 import shapely
+from IPython.display import display
 
 CPU_COUNT = 1
 
@@ -66,9 +70,9 @@ def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, e
     max_value = edges_counter.most_common(1)[0][1]
 
     if expanded:
-        edges_df, _, _ = plot_shifted_graph(graph)
+        edges_df, _ = plot_shifted_graph(graph)
     else:
-        edges_df = plot_graph(graph)
+        edges_df, _ = plot_graph(graph)
 
     to_remove_edges = []
     attributes = {
@@ -133,7 +137,7 @@ POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 
 # %% 
 # load weighted graph from file
-graph = ox.io.load_graphml('simplified_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float, 'shifted_geometry': lambda x: shapely.from_wkt(x), 'osmid': parse_junction_osmid})
+graph = ox.load_graphml('simplified_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float, 'shifted_geometry': lambda x: shapely.from_wkt(x), 'osmid': parse_junction_osmid, 'penalty': float, 'slope_percentage': float, 'length': float, 'old_edge_key': parse_old_edge_key})
 
 # some statistics of the graph
 nodes = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
@@ -200,11 +204,11 @@ print('start calculating nearest nodes')
 start = time.time()
 x = [p.x for p in starting_positions]
 y = [p.y for p in starting_positions]
-starting_node_ids = ox.distance.nearest_nodes(graph, x, y)
+starting_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
 
 x = [p.x for p in finishing_positions]
 y = [p.y for p in finishing_positions]
-finishing_node_ids = ox.distance.nearest_nodes(graph, x, y)
+finishing_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
 end = time.time()
 print(f'finished calculating nearest nodes in {end - start} seconds')
 
@@ -217,7 +221,7 @@ def distance(a, b):
 
 print('start calculating routes')
 start = time.time()
-shortest_routes = ox.routing.shortest_path(graph, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT, weight='length')
+shortest_routes = ox.shortest_path(graph, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT, weight='length')
 end = time.time()
 print(f'finished calculating routes in {end - start} seconds')
 
@@ -242,17 +246,17 @@ print('start calculating nearest nodes')
 start = time.time()
 x = [p.x for p in starting_positions]
 y = [p.y for p in starting_positions]
-starting_node_ids = ox.distance.nearest_nodes(graph, x, y)
+starting_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
 
 x = [p.x for p in finishing_positions]
 y = [p.y for p in finishing_positions]
-finishing_node_ids = ox.distance.nearest_nodes(graph, x, y)
+finishing_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
 end = time.time()
 print(f'finished calculating nearest nodes in {end - start} seconds')
 
 print('start calculating routes')
 start = time.time()
-routes = ox.routing.shortest_path(graph, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT, weight='weight')
+routes = osmnx.routing.shortest_path(graph, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT, weight='weight')
 end = time.time()
 print(f'finished calculating routes in {end - start} seconds')
 # %%
@@ -471,6 +475,11 @@ for node in tqdm(nodes, desc='calculate edge betweenness centrality', unit='node
     count = count + 1
     if count >= len(nodes):
         break
+
+# %%
+# save ebc values to file
+with open('ebc_1000_4500.pickle', 'wb') as f:
+    pickle.dump(ebc, f)
 
 # %%
 plot_edge_betweenness_centrality(graph, ebc).to_file(filename='graph.gpkg', layer='ebc_weight_1000_4500', driver='GPKG')

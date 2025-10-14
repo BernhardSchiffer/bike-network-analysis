@@ -11,7 +11,7 @@ from shapely import LineString
 # fetch graph of all streets available by bike
 place_name = 'Nürnberg'
 # use specific overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-08-16T20:21:30Z"]{maxsize}'
+ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-10T20:20:41Z"]{maxsize}'
 
 bikeable_ways = (
         '["highway"]["area"!~"yes"]["access"!~"private"]'
@@ -43,7 +43,7 @@ for e in tqdm(not_bikeable_graph.edges, desc='remove not bikeable edges', total=
 
 print('number of edges in bikeable graph after removing not bikeable edges:', len(graph.edges))
 
-graph = ox.simplification.simplify_graph(graph, remove_rings=False, edge_attrs_differ=['osmid'])
+graph = ox.simplify_graph(graph, remove_rings=False, edge_attrs_differ=['osmid'])
 
 # add geometry to straight edges that do not have a geometry
 for u, v, key, data in graph.edges(data=True, keys=True):
@@ -60,6 +60,10 @@ graph_builder = GraphBuilder()
 edge_count_before = len(graph.edges)
 graph = graph_builder.add_paths_for_bikeable_oneways(graph)
 print(f'added {len(graph.edges) - edge_count_before} paths that are bikeable in both directions')
+
+edge_count_before = len(graph.edges)
+graph = graph_builder.enforce_oneway_bikepaths(graph)
+print(f'removed {edge_count_before - len(graph.edges)} edges that are oneway for bikes')
 
 graph = graph_builder.set_node_attributes(graph)
 graph = graph_builder.set_edge_slope(graph)
@@ -84,7 +88,7 @@ graph = graph_builder.set_edge_weights(graph)
 graph.remove_nodes_from(list(nx.isolates(graph)))
 
 # save graph to file
-ox.io.save_graphml(nx.MultiDiGraph(graph), filepath='simplified_bicycle_graph.graphml')
+ox.save_graphml(nx.MultiDiGraph(graph), filepath='simplified_bicycle_graph.graphml')
 
 # %%
 # plot edges and nodes for debugging purposes
@@ -103,7 +107,7 @@ print(f'number of intersection nodes: {len(intersection_nodes)}')
 # fetch graph of all streets available by bike
 place_name = 'Nürnberg'
 # use specific overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-08-16T20:21:30Z"]{maxsize}'
+ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-10T20:20:41Z"]{maxsize}'
 
 bikeable_ways = (
         '["highway"]["area"!~"yes"]["access"!~"private"]'
@@ -135,7 +139,7 @@ for e in tqdm(not_bikeable_graph.edges, desc='remove not bikeable edges', total=
 
 print('number of edges in bikeable graph after removing not bikeable edges:', len(graph.edges))
 
-graph = ox.simplification.simplify_graph(graph, remove_rings=False, edge_attrs_differ=['osmid'])
+graph = ox.simplify_graph(graph, remove_rings=False, edge_attrs_differ=['osmid'])
 
 # add geometry to straight edges that do not have a geometry
 for u, v, key, data in graph.edges(data=True, keys=True):
@@ -161,5 +165,6 @@ graph = graph_builder.set_edge_weights(graph)
 graph.remove_nodes_from(list(nx.isolates(graph)))
 
 # save graph to file
-ox.io.save_graphml(nx.MultiDiGraph(graph), filepath='bicycle_graph.graphml')
+ox.save_graphml(nx.MultiDiGraph(graph), filepath='bicycle_graph.graphml')
+
 # %%
