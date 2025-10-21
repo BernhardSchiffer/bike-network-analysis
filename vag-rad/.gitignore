@@ -54,3 +54,6 @@ graphhopper/
 
 # files for population data
 population_data/*.tif
+
+# vag-rad data files
+vag-rad-data/

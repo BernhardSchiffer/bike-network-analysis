@@ -13,8 +13,10 @@ import pickle
 import igraph as ig
 import time
 import shapely
+import pandas as pd
 from geopandas import GeoDataFrame
 from utils.graph_builder import get_turn_direction
+from utils.visualization_utils import plot_graph, plot_shifted_graph
 from utils.graph_types import TurnDirection, LEFT, STRAIGHT, RIGHT, U_TURN
 import geopandas as gpd
 from utils.gap_evaluator import GapEvaluator
@@ -670,8 +672,6 @@ for idx, gap in tqdm(gaps_df[:10].iterrows(), desc='saving gaps to geopackage', 
     reachable_edges_gdf.to_file('gaps_analysis.gpkg', layer=f'reachable_edges_{idx}', driver='GPKG')
 
 # %%
-import pandas as pd
-
 ranked_gaps = gpd.GeoDataFrame()
 tmp_gaps_df = gaps_df.sort_values(by='additional_population_coverage', ascending=False)
 # add top 1 gaps to ranked_gaps
@@ -747,8 +747,6 @@ for idx1, gap1 in gaps_df.iterrows():
         overlaps.append((idx1, idx2, overlap))
 #%%
 # get boxplot of overlaps
-import matplotlib.pyplot as plt
-
 overlap_values = [o[2] for o in overlaps]
 plt.figure(figsize=(10, 6))
 plt.boxplot(overlap_values)
@@ -794,8 +792,5 @@ unique_gaps
 gap_subgraph = bicycle_graph.subgraph(unique_gaps[0])
 gap_gdf = ox.graph_to_gdfs(gap_subgraph, nodes=False, edges=True)['geometry'].unary_union
 gap_gdf['geometry'].unary_union
-
-# %%
-unique_gaps[0] == unique_gaps[0]
 
 # %%

@@ -32,9 +32,6 @@ class ServiceAreaProvider():
             self.service_areas = self.service_areas.merge(self.compute_service_areas(), on='osmid', how='left')
             self.save_service_areas()
 
-        return
-        self.service_areas.index = self.service_areas.index.map(int)
-
     def initialize_dataframe(self):
         osmids = []
         lat = []

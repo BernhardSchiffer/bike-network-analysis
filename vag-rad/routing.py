@@ -11,11 +11,13 @@ import psycopg2
 import os
 from dotenv import load_dotenv
 import folium
+import pandas as pd
 import geopandas as gpd
 from collections import Counter
 import time
 from utils.utils import *
 from utils.graph_types import *
+from utils.visualization_utils import plot_graph, plot_shifted_graph, plot_edge_betweenness_centrality
 import pickle
 import numpy as np
 import igraph as ig
@@ -193,6 +195,52 @@ df = df.merge(finishing_pos, on='id')
 conn.close()
 
 # %%
+# fetch trip data from excel file
+df = pd.read_excel('/Users/bernie/Downloads/Dateien (6) von Stefan Linnert_ 2021_Ausleihe_Kundendetails.xlsx,2023_Ausleihen_Kundendetails.xlsx,2019_2020_Archiv_Ausleihen_Kundendetails.xlsx,VAG Kddetails 08_24-12_24.csv,2022_Ausleihen_Kundendetails.xlsx,VAG Kddetails/2023_Ausleihen_Kundendetails.xlsx')
+
+# convert lat and lng to points
+df['starting_position'] = gpd.points_from_xy(df['Start lng'], df['Start lat'], crs='EPSG:4326')
+df['finishing_position'] = gpd.points_from_xy(df['End lng'], df['End lat'], crs='EPSG:4326')
+
+df
+# %%
+# calculate shortest routes and plot on map
+trips = df.head(10000)
+print(f'{len(trips)} trips')
+
+wg = ig.Graph.from_networkx(graph)
+nx_to_igraph_node_id_map = {node['_nx_name']: node for node in wg.vs}
+
+starting_positions = trips['starting_position']
+finishing_positions = trips['finishing_position']
+
+print('start calculating nearest nodes')
+start = time.time()
+x = [p.x for p in starting_positions]
+y = [p.y for p in starting_positions]
+starting_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
+
+starting_node_ids = [nx_to_igraph_node_id_map[node_id] for node_id in starting_node_ids]
+
+x = [p.x for p in finishing_positions]
+y = [p.y for p in finishing_positions]
+finishing_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
+
+finishing_node_ids = [nx_to_igraph_node_id_map[node_id] for node_id in finishing_node_ids]
+
+end = time.time()
+print(f'finished calculating nearest nodes in {end - start} seconds')
+
+shortest_paths = []
+
+print('start calculating routes')
+start = time.time()
+for v, to in tqdm(zip(starting_node_ids, finishing_node_ids), desc='calculating shortest paths', unit='route'):
+    shortest_paths.append(wg.get_shortest_path(v=v, to=to, weights='weight'))
+end = time.time()
+print(f'finished calculating routes in {end - start} seconds')
+
+# %%
 # calculate shortest routes and plot on map
 trips = df.head(10000)
 print(f'{len(trips)} trips')
@@ -236,7 +284,7 @@ plot_heat_map_of_edges([ s for s in shortest_routes if correct_routes(s)], graph
 
 # %%
 # calculate trips based on the new weight metric based on osm features
-trips = df.head(100000)
+trips = df.head(10000)
 print(f'{len(trips)} trips')
 
 starting_positions = trips['starting_position']
@@ -268,6 +316,13 @@ file.close()
 # %%
 # plot heatmap of calculated routes
 valid_routes = [r for r in routes if correct_routes(r)]
+
+routes_edge_ids = []
+for route in tqdm(valid_routes, desc='convert routes to edge ids', unit='route'):
+    edges = route_to_edge_ids(route)
+    routes_edge_ids.append(edges)
+
+# %%
 
 plot_heat_map_of_edges(valid_routes, graph, expanded=False).to_file(filename='graph.gpkg', layer='path_usage', driver='GPKG')
 
@@ -322,6 +377,18 @@ for s_length, w_length in zip(shortest_route_lengths, weighted_route_lengths):
     detour_factor = w_length / s_length
     detour_factors.append(detour_factor)
 # %%
+print(f'average length of shortest routes: {np.average(shortest_route_lengths)} meters')
+print(f'median length of shortest routes: {np.median(shortest_route_lengths)} meters')
+print(f'max length of shortest routes: {max(shortest_route_lengths)} meters')
+print(f'min length of shortest routes: {min(shortest_route_lengths)} meters')
+print('---')
+
+print(f'average length of weighted routes: {np.average(weighted_route_lengths)} meters')
+print(f'median length of weighted routes: {np.median(weighted_route_lengths)} meters')
+print(f'max length of weighted routes: {max(weighted_route_lengths)} meters')
+print(f'min length of weighted routes: {min(weighted_route_lengths)} meters')
+print('---')
+
 avg_detour_factor = np.average(detour_factors)
 median_detour_factor = np.median(detour_factors)
 
@@ -356,82 +423,6 @@ for detour_factor, shortest_route, weighted_route in zip(detour_factors, shortes
             count = count + 1
             if count >= limit:
                 break
-
-# %%
-def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], expanded: bool = False) -> GeoDataFrame:
-    cmap = plt.get_cmap('turbo')
-    edges_counter = Counter()
-
-    for edge, count in tqdm(zip(graph.edges, ebc), desc='count edges', unit='route'):
-        edges_counter[edge] = count
-
-    # collapse edges with same nodes ie. edges with different directions
-    if not expanded:
-        print(f'number of edges: {len(edges_counter)}')
-        for edge in list(edges_counter.keys()):
-            reversed_edge = get_reversed_key(edge)
-            if reversed_edge in edges_counter:
-                edges_counter[edge] = edges_counter[edge] + edges_counter[reversed_edge]
-                edges_counter.pop(reversed_edge)
-        print(f'number of edges after collapsing: {len(edges_counter)}')
-
-    max_value = edges_counter.most_common(1)[0][1]
-
-    if expanded:
-        edges_df, _ = plot_shifted_graph(graph)
-    else:
-        edges_df, _ = plot_graph(graph)
-
-    to_remove_edges = []
-    attributes = {
-        'count': [], 
-        'color': [], 
-        'osmid': [], 
-        'weight': [], 
-        'length': [], 
-        'penalty': [],
-        'slope': []
-    }
-    for idx, _ in tqdm(edges_df.iterrows(), desc='add count to edges', unit='edge', total=len(edges_df)):
-        try:
-            count = edges_counter[idx]
-            if count == 0:
-                to_remove_edges.append(idx)
-                continue
-            if not expanded:
-                try:
-                    s, d, k = idx
-                    graph.edges[s, d, k]['turning_angle']
-                    to_remove_edges.append((s, d, k))
-                    continue
-                except KeyError:
-                    pass
-            attributes['count'].append(count)
-            color = matplotlib.colors.to_hex(cmap(count/max_value))
-            attributes['color'].append(color)
-            attributes['osmid'].append(graph.edges[idx].get('osmid', None))
-            weight = graph.edges[idx].get('weight', None)
-            attributes['weight'].append(weight)
-            length = graph.edges[idx].get('length', None)
-            attributes['length'].append(length)
-            penalty = graph.edges[idx].get('penalty', None)
-            attributes['penalty'].append(penalty)
-            attributes['slope'].append(graph.edges[idx].get('slope_percentage', None))
-        except KeyError:
-            to_remove_edges.append((s, d, k))
-            continue
-
-    # drop rows
-    edges_df = edges_df.drop(to_remove_edges)
-
-    # add column for count and add the counts list
-    for key, value in attributes.items():
-        edges_df[key] = value
-    # only keep columns that are needed
-    columns_to_keep = ['geometry', 'line_width']
-    columns_to_keep.extend(list(attributes.keys()))
-
-    return edges_df#.reset_index(drop=True)
 
 #%%
 wg: ig.Graph = ig.Graph.from_networkx(graph)

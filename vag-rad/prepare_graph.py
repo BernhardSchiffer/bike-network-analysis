@@ -3,7 +3,8 @@
 import osmnx as ox
 import networkx as nx
 from utils.graph_builder import GraphBuilder, split_nodes
-from utils.utils import shift_graph, plot_shifted_graph
+from utils.utils import shift_graph
+from utils.visualization_utils import plot_shifted_graph
 from tqdm import tqdm
 from shapely import LineString
 

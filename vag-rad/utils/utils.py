@@ -10,8 +10,6 @@ import multiprocessing as mp
 from utils.graph_types import *
 import leafmap.foliumap as leafmap
 import typing
-import matplotlib
-import matplotlib.colors
 import shapely
 from pyproj import Geod, Transformer
 from tqdm import tqdm
@@ -267,116 +265,6 @@ def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
         graph.edges[s, d, key]['shifted_geometry'] = line
 
     return graph
-
-def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame, GeoDataFrame | None]:
-    debug_marker_df = None
-
-    if debug_marker:
-        debug_marker_df = {'osmid': [], 'geometry': [], 'color': [], 'size': [], 'label': []}
-    
-        for node in graph.nodes:
-            try:
-                x_reversed = graph.nodes[node]['x_reversed']
-                y_reversed = graph.nodes[node]['y_reversed']
-                debug_marker_df['geometry'].append(shapely.Point([x_reversed, y_reversed]))
-                debug_marker_df['color'].append(matplotlib.colors.to_hex('red'))
-                debug_marker_df['size'].append(10)
-                debug_marker_df['label'].append(f'{node} reversed')
-                debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
-            except:
-                pass
-            try:
-                x_not_reversed = graph.nodes[node]['x_not_reversed']
-                y_not_reversed = graph.nodes[node]['y_not_reversed']
-                debug_marker_df['geometry'].append(shapely.Point([x_not_reversed, y_not_reversed]))
-                debug_marker_df['color'].append(matplotlib.colors.to_hex('blue'))
-                debug_marker_df['size'].append(10)
-                debug_marker_df['label'].append(f'{node} not reversed')
-                debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
-            except:
-                pass
-            
-        debug_marker_df = GeoDataFrame(debug_marker_df, crs='EPSG:4326')
-    
-    # plot edges
-    edges_df = {'u': [], 'v': [], 'key': [], 'osmid': [], 'geometry': [], 'color': [], 'line_width': [], 'tooltip': []}
-
-    for s, d, key, data in tqdm(graph.edges(data=True, keys=True), desc='Plotting edges', unit='edges'):
-
-        try:
-            reversed = data['reversed']
-        except:
-            reversed = None
-
-        if reversed == True:
-            color = 'red'
-        if reversed == False:
-            color = 'blue'
-        # nodes at intersections only have one of those attributes (*_reversed, *_not_reversed) because they are only traversed in one direction
-        if reversed is None:
-            color = 'green'
-
-        color = data['color'] if 'color' in data else color
-
-        edges_df['u'].append(s)
-        edges_df['v'].append(d)
-        edges_df['key'].append(key)
-        edges_df['osmid'].append(data.get('osmid', None))
-        edges_df['geometry'].append(data['shifted_geometry'])
-        edges_df['color'].append(matplotlib.colors.to_hex(color))
-        edges_df['line_width'].append(0.1)
-        edges_df['tooltip'].append(f'''<div style="color:white">
-                                        osmid: {data.get('osmid', None)}<br>
-                                        edge: {s} -> {d}<br>
-                                        reversed: {reversed}<br>
-                                        slope: {data.get('slope_percentage', None)}<br>
-                                        penalty: {data.get('penalty', None)}<br>
-                                        length: {data.get('length', None)}<br>
-                                        weight: {data.get('weight', None)}<br>
-                                        turning angle: {data.get('turning_angle', None)}<br>
-                                        applied filters: {data.get('applied_filters', None)}<br>
-                                    </div>''')
-    
-    edges_df = GeoDataFrame(edges_df, crs='EPSG:4326').set_index(['u', 'v', 'key'])
-
-    return edges_df, debug_marker_df
-
-def plot_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame, GeoDataFrame | None]:
-    debug_marker_df = None
-
-    if debug_marker:
-        debug_marker_df = {'osmid': [], 'geometry': [], 'color': [], 'size': [], 'label': []}
-    
-        for node in graph.nodes:
-            debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
-            debug_marker_df['geometry'].append(shapely.Point([graph.nodes[node]['x'], graph.nodes[node]['y']]))
-            debug_marker_df['color'].append(matplotlib.colors.to_hex('black'))
-            debug_marker_df['size'].append(10)
-            debug_marker_df['label'].append(f'{node} original')
-            
-        debug_marker_df = GeoDataFrame(debug_marker_df, crs='EPSG:4326')
-    
-    # plot edges
-    edges_df = {'u': [], 'v': [], 'key': [], 'geometry': [], 'color': [], 'line_width': [], 'tooltip': []}
-
-    for s, d, key, data in tqdm(graph.edges(data=True, keys=True), desc='Plotting edges', unit='edges'):
-
-        color = data['color'] if 'color' in data else 'black'
-
-        edges_df['u'].append(s)
-        edges_df['v'].append(d)
-        edges_df['key'].append(key)
-        edges_df['geometry'].append(data.get('geometry', None))
-        edges_df['color'].append(matplotlib.colors.to_hex(color))
-        edges_df['line_width'].append(0.1)
-        edges_df['tooltip'].append(f'''<div style="color:white">
-                                        osmid: {data.get('osmid', None)}<br>
-                                        edge: {s} -> {d}<br>
-                                    </div>''')
-    
-    edges_df = GeoDataFrame(edges_df, crs='EPSG:4326').set_index(['u', 'v', 'key'])
-
-    return edges_df, debug_marker_df
 
 def is_tuple(s: str) -> bool:
     if type(s) != str:

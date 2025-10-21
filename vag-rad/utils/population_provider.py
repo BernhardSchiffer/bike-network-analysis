@@ -13,7 +13,7 @@ class PopulationProvider(ABC):
         pass
 
     @abstractmethod
-    def get_Population_at_point(self, point: shapely.Point) -> float:
+    def get_population_at_point(self, point: shapely.Point) -> float:
         pass
 
 class GHSLPopulationProvider(PopulationProvider):
@@ -48,7 +48,7 @@ class GHSLPopulationProvider(PopulationProvider):
         
         return added_population
     
-    def get_Population_at_point(self, point: shapely.Point) -> float:
+    def get_population_at_point(self, point: shapely.Point) -> float:
         row, col = self.population_src.index(point.x, point.y)
         return self.population_data[row, col]
 
@@ -322,7 +322,7 @@ class NurenbergDistrictPopulationProvider(PopulationProvider):
         
         return total_population
     
-    def get_Population_at_point(self, point: shapely.Point) -> float:
+    def get_population_at_point(self, point: shapely.Point) -> float:
         for _, row in self.population_gdf.iterrows():
             if row['geometry'].contains(point):
                 return row['population']
