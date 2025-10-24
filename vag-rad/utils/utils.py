@@ -11,7 +11,8 @@ from utils.graph_types import *
 import leafmap.foliumap as leafmap
 import typing
 import shapely
-from pyproj import Geod, Transformer
+from shapely.ops import transform
+from pyproj import Geod, Transformer, CRS
 from tqdm import tqdm
 import numpy as np
 
@@ -397,3 +398,18 @@ def parse_old_edge_key(s: str) -> tuple[int, int, int]:
     if len(parts) != 3:
         raise ValueError(f'expected 3 parts in old_edge_key but got {len(parts)} parts')
     return (parts[0], parts[1], parts[2])
+
+def buffer_in_meters(geometry: shapely.Geometry, buffer_m: float) -> shapely.Geometry:
+    wgs84 = CRS('EPSG:4326')
+    utm = CRS('EPSG:25832')
+
+    project = Transformer.from_crs(wgs84, utm, always_xy=True).transform
+    project_back = Transformer.from_crs(utm, wgs84, always_xy=True).transform
+
+    # project to epsg 25832
+    utm_geometry = transform(project, geometry)
+    # buffer in meters
+    buffered_geometry = utm_geometry.buffer(buffer_m)
+    # project back to epsg 4326
+    buffered_wgs84_geometry = transform(project_back, buffered_geometry)
+    return buffered_wgs84_geometry

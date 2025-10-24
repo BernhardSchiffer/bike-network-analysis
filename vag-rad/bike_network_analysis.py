@@ -5,6 +5,7 @@ from osmnx.simplification import simplify_graph
 import networkx as nx
 import folium
 import matplotlib
+import matplotlib.colors
 from matplotlib.cm import get_cmap
 import matplotlib.pyplot as plt
 import osmium
@@ -14,14 +15,12 @@ from osmium.osm import WAY
 from collections import Counter
 import geopandas as gpd
 from shapely import LineString
-from shapely.geometry import Polygon
 from tqdm import tqdm
-import rasterio
 from utils.graph_builder import GraphBuilder
 from utils.polygon_filter import PolygonFilter
 from utils.utils import *
+from utils.overpass_utils import fetch_city_polygon
 from IPython.display import display
-from utils.qgis_utils import get_network_coverage
 from utils.population_provider import NurenbergDistrictPopulationProvider, GHSLPopulationProvider
 from utils.service_area_provider import ServiceAreaProvider
 
@@ -74,6 +73,7 @@ sorted(bicycle_stats.most_common(len(bicycle_stats)))
 # %% 
 # fetch graph of all streets available by bike
 place_name = 'Nürnberg'
+query_polygon = fetch_city_polygon(place_name)
 # use specific overpass settings
 ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-13T20:21:02Z"]{maxsize}'
 
@@ -88,7 +88,7 @@ bikeable_areas = '["area"~"yes"]["bicycle"~"yes"]'
 bikeable_footpaths = '["highway"~"footway"]["bicycle"~"yes|designated|dismount"]'
 bikeable_crossings = '["crossing"~"yes"]["bicycle"~"yes"]'
 
-routing_graph = ox.graph_from_place(query=place_name, simplify=False, retain_all=True, custom_filter=[bikeable_ways, bikeable_areas, bikeable_footpaths])
+routing_graph = ox.graph_from_polygon(polygon=query_polygon, simplify=False, retain_all=True, custom_filter=[bikeable_ways, bikeable_areas, bikeable_footpaths])
 print('number of edges in bikeable graph:', len(routing_graph.edges))
 
 not_bikeable_ways = '["highway"~"pedestrian"]["bicycle"!~"yes"]'
@@ -117,7 +117,7 @@ for u, v, key, data in routing_graph.edges(data=True, keys=True):
 print('number of edges in bikeable graph after simplifying:', len(routing_graph.edges))
 
 # set node and edge attributes
-graph_builder = GraphBuilder()
+graph_builder = GraphBuilder(query_polygon)
 
 # add paths where the street is oneway but bikes are allowed in both directions
 edge_count_before = len(routing_graph.edges)

@@ -5,7 +5,7 @@ import rasterio
 import geopandas as gpd
 import overpy
 from tqdm import tqdm
-from utils.overpass_utils import get_polygon_from_result
+from utils.overpass_utils import get_polygon_from_result, fetch_city_polygon
 
 class PopulationProvider(ABC):
     @abstractmethod
@@ -199,18 +199,7 @@ class NurenbergDistrictPopulationProvider(PopulationProvider):
             raise ValueError(f'No cached values found for district {filename}/{district_name}')
         
     def fetch_nuremberg_area(self) -> shapely.MultiPolygon:
-        result = self.api.query(f"""
-                            (
-                                relation[place="city"][name="Nürnberg"];
-                            );
-                            out body;
-                            >;
-                            out skel qt;
-                        """)
-        if result.ways is None or len(result.ways) == 0:
-            raise ValueError(f'No area found for Nürnberg')
-        else:
-            return get_polygon_from_result(result)
+        return fetch_city_polygon('Nürnberg')
         
     def fetch_district_area(self, district_name: str) -> shapely.MultiPolygon:
         result = self.api.query(f"""

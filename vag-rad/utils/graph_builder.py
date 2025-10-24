@@ -4,8 +4,6 @@ from osmnx.bearing import calculate_bearing
 import shapely
 from shapely.geometry import LineString
 from tqdm import tqdm
-from pyproj import Transformer
-import rasterio
 import pickle
 import osmium
 from osmium.filter import EntityFilter, EmptyTagFilter
@@ -16,6 +14,7 @@ import os
 import pandas as pd
 import geopandas as gpd
 import math
+from utils.elevation_provider import DEMElevationProvider
 
 def get_edge_by_osmid(graph: nx.MultiDiGraph, osmid) -> EdgeId:
     for edge in graph.edges(data=True, keys=True):
@@ -50,15 +49,15 @@ def get_angle_between_edges(e1: LineString, e2: LineString):
     return (bearing_diff+180)%360-180
 
 def get_turn_direction(turn_angle: float) -> TurnDirection:
-    if turn_angle < -160:
+    if turn_angle < -170:
         return U_TURN
-    elif turn_angle >= -160 and turn_angle < -45:
+    elif turn_angle >= -170 and turn_angle < -60:
         return LEFT
-    elif turn_angle >= -45 and turn_angle < 45:
+    elif turn_angle >= -60 and turn_angle <= 60:
         return STRAIGHT
-    elif turn_angle >= 45 and turn_angle < 160:
+    elif turn_angle > 60 and turn_angle <= 170:
         return RIGHT
-    elif turn_angle >= 160:
+    elif turn_angle > 170:
         return U_TURN
     else:
         raise ValueError(f'Invalid turn angle: {turn_angle}')
@@ -171,8 +170,7 @@ def has_bike_lane(tags: dict[str, str], direction: StreetDirection) -> bool:
 
 def has_bike_path(tags: dict[str, str], direction: StreetDirection) -> bool:
     bike_path_filter: list[tuple[str, str]] = [
-        ("bicycle", "designated"),
-        ("foot", "designated")
+        ("bicycle", "designated")
     ]
     return all(is_tag_available(k, v, tags) for k, v in bike_path_filter)
     
@@ -260,17 +258,14 @@ def is_bikeable_sidewalk(tags: dict[str, str], direction: StreetDirection) -> bo
         return False
 
 class GraphBuilder:
-    def __init__(self):
+    def __init__(self, area: shapely.Polygon | shapely.MultiPolygon):
+        self.area = area
         self.osm_data_dir = 'osm_data'
-        self.osm_data_file = f'{self.osm_data_dir}/mittelfranken-latest.osm.pbf'
-        self.osm_to_geotiff = Transformer.from_crs("EPSG:4326", "EPSG:25832")
-        self.geotiff_to_osm = Transformer.from_crs("EPSG:25832", "EPSG:4326")
-        self.dat = rasterio.open('./DEM/nuernberg.tif')
-        # read all the data from the first band
-        self.z = self.dat.read()[0]
-        self.load_osm_attributes()
+        self.osm_data_file = f'{self.osm_data_dir}/bayern-latest.osm.pbf'
+        self.elevation_provider = DEMElevationProvider()
+        self.load_osm_attributes(area)
 
-    def load_osm_attributes(self):
+    def load_osm_attributes(self, area: shapely.Polygon | shapely.MultiPolygon):
         # load osm edge attributes from file
         edge_lookup_filename = f'{self.osm_data_dir}/osm_edges_with_attributes.pickle'
 
@@ -278,40 +273,36 @@ class GraphBuilder:
             with open(edge_lookup_filename, 'rb') as f:
                 self.edges_osm_data_lookup = pickle.load(f)
         else:
-            # create lookup table for all edges in nuernberg with all their osm features
-            place = ox.geocode_to_gdf('Nürnberg')
+            # create lookup table for all edges in area with all their osm features
+            edges_in_area = []
 
-            edges_in_nbg = []
-
-            for w in osmium.FileProcessor(self.osm_data_file).with_locations().with_filter(EmptyTagFilter()).with_filter(EntityFilter(WAY)).with_filter(PolygonFilter(place.geometry[0])):
+            for w in osmium.FileProcessor(self.osm_data_file).with_locations().with_filter(EmptyTagFilter()).with_filter(EntityFilter(WAY)).with_filter(PolygonFilter(area)):
                 obj = {}
                 obj['osmid'] = w.id
                 tags = {}
                 for k, v in w.tags:
                     tags[k] = v
                 obj['tags'] = tags
-                edges_in_nbg.append(obj)
+                edges_in_area.append(obj)
 
-            self.edges_osm_data_lookup = pd.DataFrame(edges_in_nbg).set_index('osmid')
+            self.edges_osm_data_lookup = pd.DataFrame(edges_in_area).set_index('osmid')
 
             # write osm edge attributes to file
             file = open(edge_lookup_filename, 'wb')
             pickle.dump(self.edges_osm_data_lookup, file)
             file.close()
     
-    def load_osm_restrictions(self):
+    def load_osm_restrictions(self, area: shapely.Polygon | shapely.MultiPolygon):
         node_lookup_filename = f'{self.osm_data_dir}/osm_restrictions.pickle'
 
         if os.path.isfile(node_lookup_filename):
             with open(node_lookup_filename, 'rb') as f:
                 self.restrictions_osm_data_lookup = pickle.load(f)
         else:
-            # create lookup table for all edges in nuernberg with all their osm features
-            place = ox.geocode_to_gdf('Nürnberg')
+            # create lookup table for all edges in area with all their osm features
+            restrictions_in_area = []
 
-            restrictions_in_nbg = []
-
-            for r in osmium.FileProcessor(self.osm_data_file).with_locations().with_filter(EmptyTagFilter()).with_filter(EntityFilter(RELATION)).with_filter(PolygonFilter(place.geometry[0])):
+            for r in osmium.FileProcessor(self.osm_data_file).with_locations().with_filter(EmptyTagFilter()).with_filter(EntityFilter(RELATION)):
                 if r.tags.get('type', None) == 'restriction':
                     obj = {}
                     obj['from'] = [m for m in r.members if m.role == 'from']
@@ -321,9 +312,9 @@ class GraphBuilder:
                     for k, v in r.tags:
                         tags[k] = v
                     obj['tags'] = tags
-                    restrictions_in_nbg.append(obj)
+                    restrictions_in_area.append(obj)
 
-            self.restrictions_osm_data_lookup = pd.DataFrame(restrictions_in_nbg)
+            self.restrictions_osm_data_lookup = pd.DataFrame(restrictions_in_area)
 
             # write osm edge attributes to file
             file = open(node_lookup_filename, 'wb')
@@ -380,11 +371,6 @@ class GraphBuilder:
         print(f'removing {len(edges_to_remove)} edges that are oneway for bikes')
         graph.remove_edges_from(edges_to_remove)
         return graph
-
-    def get_elevation(self, lon, lat):
-        x, y = self.osm_to_geotiff.transform(lat, lon)
-        idx = self.dat.index(x, y, precision=1E-6)
-        return self.dat.xy(*idx), self.z[idx]
     
     # set node attributes
     def set_node_attributes(self, graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
@@ -406,11 +392,11 @@ class GraphBuilder:
     def set_node_elevation(self, graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
         elevation_for_nodes: dict[int, dict[str, float]] = {}
 
-        for osmid, data in graph.nodes(data=True):
+        for idx, data in graph.nodes(data=True):
             lat = data['y']
             lon = data['x']
-            _, elevation = self.get_elevation(lon, lat)
-            elevation_for_nodes[osmid]  = {
+            elevation = self.elevation_provider.get_elevation(lon, lat)
+            elevation_for_nodes[idx] = {
                 'elevation': elevation
             }
 
@@ -581,10 +567,12 @@ class GraphBuilder:
     def enforce_restrictions(self, graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
         graph = graph.copy()
         # load restrictions
-        self.load_osm_restrictions()
+        self.load_osm_restrictions(self.area)
         restrictions = self.restrictions_osm_data_lookup
 
         edge_osmid_to_key_lookup = ox.graph_to_gdfs(graph, nodes=False, edges=True)
+        # parsing osmid to string because dataframe index does not support tuples
+        edge_osmid_to_key_lookup['osmid'] = edge_osmid_to_key_lookup['osmid'].apply(lambda x: str(x))
         edge_osmid_to_key_lookup = edge_osmid_to_key_lookup.reset_index().set_index('osmid', drop=True)
         # Ensure it's a GeoDataFrame
         edge_osmid_to_key_lookup = gpd.GeoDataFrame(edge_osmid_to_key_lookup, geometry='geometry')
@@ -615,7 +603,7 @@ class GraphBuilder:
                             graph.remove_edge(*edge)
                         except nx.NetworkXError:
                             continue
-                case 'no_straight_on' | 'no_right_turn' | 'no_left_turn':
+                case 'no_straight_on' | 'no_right_turn' | 'no_left_turn' | 'no_u_turn':
                     try:
                         restricted_edge = get_edge_by_osmid_indexed(edge_osmid_to_key_lookup, str((from_way[0].ref, to_way[0].ref)))
                     except KeyError:

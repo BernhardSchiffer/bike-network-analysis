@@ -148,6 +148,22 @@ edges = ox.graph_to_gdfs(graph, nodes=False)
 print(f'number of edges: {len(edges)}')
 print(f'length of network: {sum(edges["length"])} meters')
 
+# %%
+for u, v, key, data in graph.edges(data=True, keys=True):
+    if data.get('osmid', None) == (219246154, 31723299):
+        print(f'edge {u}-{v}-{key} has osmid {data.get("osmid", None)}')
+
+# %%
+edge_osmid_to_key_lookup = ox.graph_to_gdfs(graph, nodes=False, edges=True)
+edge_osmid_to_key_lookup['osmid'] = edge_osmid_to_key_lookup['osmid'].apply(lambda x: str(x))
+edge_osmid_to_key_lookup = edge_osmid_to_key_lookup.reset_index().set_index('osmid', drop=True)
+# Ensure it's a GeoDataFrame
+edge_osmid_to_key_lookup = gpd.GeoDataFrame(edge_osmid_to_key_lookup, geometry='geometry')
+
+edge_osmid_to_key_lookup
+
+#%%
+edge_osmid_to_key_lookup.loc['(219246154, 31723299)']
 # %% 
 # get rides of all bikes over time
 

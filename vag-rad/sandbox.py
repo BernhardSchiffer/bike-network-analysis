@@ -72,7 +72,6 @@ duplicated_nodes = list()
 for node in start_nodes:
     if node in target_nodes:
         duplicated_nodes.append(node)
-        print(f'node {node} is in both start and target nodes')
 
 print(f'found {len(duplicated_nodes)} duplicated nodes')
 
@@ -99,7 +98,7 @@ gpd.GeoDataFrame({'osmid': [node['osmid'] for node in duplicated_nodes], 'node_i
 #%%
 
 start = time.time()
-ebc = wg.edge_betweenness_limit(directed=True, distances="length", edge_weights="weight", sources=start_nodes, targets=start_nodes, population_weights="area_weight", lower_limit=0, upper_limit=4500, normalized=False)
+ebc = wg.edge_betweenness_limit(directed=True, distances="length", edge_weights="weight", sources=start_nodes, targets=target_nodes, population_weights="population", lower_limit=0, upper_limit=4500, normalized=False)
 end = time.time()
 print(f'calculated edge betweenness centrality in {end - start} seconds')
 
@@ -189,7 +188,7 @@ def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], e
     return edges_df#.reset_index(drop=True)
 
 # %%
-plot_edge_betweenness_centrality(routing_graph, ebc, expanded=True).to_file('ebc_debug.gpkg', layer='ebc_subset_limit_area_weight', driver='GPKG')
+plot_edge_betweenness_centrality(routing_graph, ebc, expanded=True).to_file('ebc_debug.gpkg', layer='ebc_subset_limit_population', driver='GPKG')
 # %%
 import numpy as np
 

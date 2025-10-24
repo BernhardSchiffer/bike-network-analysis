@@ -62,3 +62,17 @@ def get_polygon_from_result(result: overpy.Result) -> shapely.MultiPolygon:
         polygons.append(shapely.Polygon(border))
     
     return shapely.union_all(polygons)
+
+def fetch_city_polygon(city_name: str, api: overpy.Overpass = overpy.Overpass(url='https://maps.mail.ru/osm/tools/overpass/api/interpreter')) -> shapely.MultiPolygon:
+    result = api.query(f"""
+                        (
+                            relation[place="city"][name="{city_name}"];
+                        );
+                        out body;
+                        >;
+                        out skel qt;
+                    """)
+    if result.ways is None or len(result.ways) == 0:
+        raise ValueError(f'No area found for {city_name}')
+    else:
+        return get_polygon_from_result(result)
