@@ -212,37 +212,13 @@ df = df.merge(finishing_pos, on='id')
 conn.close()
 
 # %%
-# merge all years into a single dataframe
-df_2019_2020 = pd.read_csv('vag-rad-data/processed/2019_2020_Ausleihen_Kundendetails.csv')
-df_2021 = pd.read_csv('vag-rad-data/processed/2021_Ausleihen_Kundendetails.csv')
-df_2022 = pd.read_csv('vag-rad-data/processed/2022_Ausleihen_Kundendetails.csv')
-df_2023 = pd.read_csv('vag-rad-data/processed/2023_Ausleihen_Kundendetails.csv')
-df_2024 = pd.read_csv('vag-rad-data/processed/2024_Ausleihen_Kundendetails.csv')
-
-df = pd.concat([df_2019_2020, df_2021, df_2022, df_2023, df_2024], ignore_index=True)
+# load all rentals from file
+df = pd.read_csv('vag-rad-data/processed/All_Filtered_Ausleihen_Kundendetails.csv')
 
 df['starting_position'] = shapely.from_wkt(df['starting_position'])
 df['finishing_position'] = shapely.from_wkt(df['finishing_position'])
 
 df = gpd.GeoDataFrame(df, geometry='starting_position', crs='EPSG:4326')
-
-# change crs of geoSeries to epsg 25832
-starting_points = gpd.GeoSeries(df['starting_position'], crs='EPSG:4326').to_crs(epsg=25832)
-finishing_points = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').to_crs(epsg=25832)
-
-# filter entries where the distance between starting and finishing position is more than 100 meters
-df = df[starting_points.distance(finishing_points) > 100]
-
-df
-
-# %%
-# filter all rows where starting or finishing is within the polygon of nuremberg
-nbg_polygon = fetch_city_polygon('Nürnberg')
-
-starting_positions_in_nbg = gpd.GeoSeries(df['starting_position'], crs='EPSG:4326').within(nbg_polygon)
-finishing_positions_in_nbg = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').within(nbg_polygon)
-
-df = df[starting_positions_in_nbg | finishing_positions_in_nbg]
 df
 
 # %%
