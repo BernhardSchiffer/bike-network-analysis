@@ -18,6 +18,7 @@ import time
 from utils.utils import *
 from utils.graph_types import *
 from utils.visualization_utils import plot_graph, plot_shifted_graph, plot_edge_betweenness_centrality
+from utils.overpass_utils import fetch_city_polygon
 import pickle
 import numpy as np
 import igraph as ig
@@ -232,6 +233,16 @@ finishing_points = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').to_c
 # filter entries where the distance between starting and finishing position is more than 100 meters
 df = df[starting_points.distance(finishing_points) > 100]
 
+df
+
+# %%
+# filter all rows where starting or finishing is within the polygon of nuremberg
+nbg_polygon = fetch_city_polygon('Nürnberg')
+
+starting_positions_in_nbg = gpd.GeoSeries(df['starting_position'], crs='EPSG:4326').within(nbg_polygon)
+finishing_positions_in_nbg = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').within(nbg_polygon)
+
+df = df[starting_positions_in_nbg | finishing_positions_in_nbg]
 df
 
 # %%
