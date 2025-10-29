@@ -3,6 +3,7 @@
 import pandas as pd
 import geopandas as gpd
 import shapely.geometry
+import numpy as np
 
 # %%
 # Ausleihen 2019 und 2020
@@ -26,6 +27,13 @@ df.drop(indices_to_drop, inplace=True)
 assert df.isna().sum().sum() == 0, f'dataframe has missing values {df.isna().sum()}'
 assert all(not point.is_empty for point in df['starting_position'].values), "There are empty geometries in 'starting_position'"
 assert all(not point.is_empty for point in df['finishing_position'].values), "There are empty geometries in 'finishing_position'"
+assert all(type(v) is np.datetime64 for v in df['Start time'].values), "There are non-datetime values in 'Start time'"
+
+# convert Start time and End time to ISO format
+df['Start time'] = pd.to_datetime(df['Start time'])
+df['End time'] = pd.to_datetime(df['End time'])
+df['Start time'] = df['Start time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
+df['End time'] = df['End time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
 
 # save cleaned data to file
 df.to_csv('vag-rad-data/processed/2019_2020_Ausleihen_Kundendetails.csv', index=False)
@@ -45,6 +53,13 @@ df.drop(columns=['Start lat', 'Start lng', 'End lat', 'End lng', 'Monat', 'Bike 
 assert df.isna().sum().sum() == 0, f'dataframe has missing values {df.isna().sum()}'
 assert all(not point.is_empty for point in df['starting_position'].values), "There are empty geometries in 'starting_position'"
 assert all(not point.is_empty for point in df['finishing_position'].values), "There are empty geometries in 'finishing_position'"
+assert all(type(v) is np.datetime64 for v in df['Start time'].values), "There are non-datetime values in 'Start time'"
+
+# convert Start time and End time to ISO format
+df['Start time'] = pd.to_datetime(df['Start time'])
+df['End time'] = pd.to_datetime(df['End time'])
+df['Start time'] = df['Start time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
+df['End time'] = df['End time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
 
 # save cleaned data to file
 df.to_csv('vag-rad-data/processed/2021_Ausleihen_Kundendetails.csv', index=False)
@@ -64,6 +79,13 @@ df.drop(columns=['Start lat', 'Start lng', 'End lat', 'End lng', 'First name', '
 assert df.isna().sum().sum() == 0, f'dataframe has missing values {df.isna().sum()}'
 assert all(not point.is_empty for point in df['starting_position'].values), "There are empty geometries in 'starting_position'"
 assert all(not point.is_empty for point in df['finishing_position'].values), "There are empty geometries in 'finishing_position'"
+assert all(type(v) is np.datetime64 for v in df['Start time'].values), "There are non-datetime values in 'Start time'"
+
+# convert Start time and End time to ISO format
+df['Start time'] = pd.to_datetime(df['Start time'])
+df['End time'] = pd.to_datetime(df['End time'])
+df['Start time'] = df['Start time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
+df['End time'] = df['End time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
 
 # save cleaned data to file
 df.to_csv('vag-rad-data/processed/2022_Ausleihen_Kundendetails.csv', index=False)
@@ -86,6 +108,13 @@ for idx, row in df.iterrows():
 assert df.isna().sum().sum() == 0, f'dataframe has missing values {df.isna().sum()}'
 assert all(not point.is_empty for point in df['starting_position'].values), "There are empty geometries in 'starting_position'"
 assert all(not point.is_empty for point in df['finishing_position'].values), "There are empty geometries in 'finishing_position'"
+assert all(type(v) is np.datetime64 for v in df['Start time'].values), "There are non-datetime values in 'Start time'"
+
+# convert Start time and End time to ISO format
+df['Start time'] = pd.to_datetime(df['Start time'])
+df['End time'] = pd.to_datetime(df['End time'])
+df['Start time'] = df['Start time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
+df['End time'] = df['End time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
 
 # save cleaned data to file
 df.to_csv('vag-rad-data/processed/2023_Ausleihen_Kundendetails.csv', index=False)
@@ -109,10 +138,21 @@ df_1.drop(columns=['start_lat', 'start_lng', 'end_lat', 'end_lng', 'Unnamed: 9',
 
 df_1.rename(columns={'start_time':'Start time', 'end_time':'End time', 'duration':'Duration', 'start_place_id':'Rental place', 'end_place_id':'Return place'}, inplace=True)
 
+# parse start and end times to datetime
+df_1['Start time'] = pd.to_datetime(df_1['Start time'], format='%d.%m.%Y %H:%M')
+df_1['End time'] = pd.to_datetime(df_1['End time'], format='%d.%m.%Y %H:%M')
+
 # show if dataframe has missing values
 assert df_1.isna().sum().sum() == 0, f'dataframe has missing values {df_1.isna().sum()}'
 assert all(not point.is_empty for point in df_1['starting_position'].values), "There are empty geometries in 'starting_position'"
 assert all(not point.is_empty for point in df_1['finishing_position'].values), "There are empty geometries in 'finishing_position'"
+assert all(type(v) is np.datetime64 for v in df_1['Start time'].values), "There are non-datetime values in 'Start time'"
+
+# convert Start time and End time to ISO format
+df_1['Start time'] = pd.to_datetime(df_1['Start time'])
+df_1['End time'] = pd.to_datetime(df_1['End time'])
+df_1['Start time'] = df_1['Start time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
+df_1['End time'] = df_1['End time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
 
 df_2 = pd.read_csv('vag-rad-data/raw/VAG Kddetails 08_24-12_24.csv', sep=';')
 
@@ -131,10 +171,21 @@ df_2.drop(columns=['start_lat', 'start_lng', 'end_lat', 'end_lng'], inplace=True
 
 df_2.rename(columns={'start_time':'Start time', 'end_time':'End time', 'duration':'Duration', 'start_place_id':'Rental place', 'end_place_id':'Return place'}, inplace=True)
 
+# parse start and end times to datetime
+df_2['Start time'] = pd.to_datetime(df_2['Start time'], format='%d.%m.%Y %H:%M')
+df_2['End time'] = pd.to_datetime(df_2['End time'], format='%d.%m.%Y %H:%M')
+
 # show if dataframe has missing values
 assert df_2.isna().sum().sum() == 0, f'dataframe has missing values {df_2.isna().sum()}'
 assert all(not point.is_empty for point in df_2['starting_position'].values), "There are empty geometries in 'starting_position'"
 assert all(not point.is_empty for point in df_2['finishing_position'].values), "There are empty geometries in 'finishing_position'"
+assert all(type(v) is np.datetime64 for v in df_2['Start time'].values), "There are non-datetime values in 'Start time'"
+
+# convert Start time and End time to ISO format
+df_2['Start time'] = pd.to_datetime(df_2['Start time'])
+df_2['End time'] = pd.to_datetime(df_2['End time'])
+df_2['Start time'] = df_2['Start time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
+df_2['End time'] = df_2['End time'].dt.strftime('%Y-%m-%dT%H:%M:%S')
 
 # merge both dataframes
 df = pd.concat([df_1, df_2], ignore_index=True)
@@ -142,41 +193,4 @@ df = pd.concat([df_1, df_2], ignore_index=True)
 # save cleaned data to file
 df.to_csv('vag-rad-data/processed/2024_Ausleihen_Kundendetails.csv', index=False)
 
-# %%
-# merge all years into a single dataframe
-df_2019_2020 = pd.read_csv('vag-rad-data/processed/2019_2020_Ausleihen_Kundendetails.csv')
-df_2021 = pd.read_csv('vag-rad-data/processed/2021_Ausleihen_Kundendetails.csv')
-df_2022 = pd.read_csv('vag-rad-data/processed/2022_Ausleihen_Kundendetails.csv')
-df_2023 = pd.read_csv('vag-rad-data/processed/2023_Ausleihen_Kundendetails.csv')
-df_2024 = pd.read_csv('vag-rad-data/processed/2024_Ausleihen_Kundendetails.csv')
-
-df_all = pd.concat([df_2019_2020, df_2021, df_2022, df_2023, df_2024], ignore_index=True)
-
-print(f'Total number of rentals from 2019 to 2024: {len(df_all)}')
-print(f'Median rental duration (in minutes): {df_all["Duration"].median()/60:.2f}')
-
-# map starting and finishing positions from wkt
-df_all['starting_position'] = gpd.GeoSeries.from_wkt(df_all['starting_position'], crs='EPSG:4326')
-df_all['finishing_position'] = gpd.GeoSeries.from_wkt(df_all['finishing_position'], crs='EPSG:4326')
-
-#%%
-# calculate straight-line distances between starting and finishing positions
-distances = gpd.GeoDataFrame(df_all[['starting_position', 'finishing_position']], crs='EPSG:4326', geometry='starting_position')
-
-# transform starting and finishing positions to epsg 25832 for distance calculation
-distances['starting_position'] = distances['starting_position'].to_crs(epsg=25832)
-distances['finishing_position'] = distances['finishing_position'].to_crs(epsg=25832)
-
-# calculate distances between starting and finishing positions in meters
-distances['distance_m'] = distances.apply(lambda row: row['starting_position'].distance(row['finishing_position']), axis=1)
-
-print(f'Median straight-line distance between starting and finishing positions (in meters): {distances["distance_m"].median():.2f}')
-
-distances['distance_m'].plot.hist(bins=100, range=(100, 5000), title='Histogram of straight-line distances between starting and finishing positions', xlabel='Distance (m)', ylabel='Number of rentals')
-
-# %%
-# plot starting and finishing positions
-gpd.GeoDataFrame(df_all['starting_position'], geometry='starting_position').to_file('vag-rad-rentals.gpkg', layer='starting_positions', driver='GPKG')
-
-gpd.GeoDataFrame(df_all['finishing_position'], geometry='finishing_position').to_file('vag-rad-rentals.gpkg', layer='finishing_position', driver='GPKG')
 # %%

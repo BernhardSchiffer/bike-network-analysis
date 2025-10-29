@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from utils.population_provider import GHSLPopulationProvider
 from tqdm import tqdm
+import numpy as np
 
 #%%
 # load graph from file
@@ -32,14 +33,15 @@ wg: ig.Graph = ig.Graph.from_networkx(routing_graph)
 #%%
 #polygon = shapely.box(49.464443, 11.160049, 49.467148, 11.167560)
 
-upper_bound = 4500
-lower_bound = 1000
-
 def is_intersection_node(node) -> bool:
     return node['_nx_name'] != node['osmid']
 
 def is_intersection_edge(edge) -> bool:
     return edge['turning_angle'] is not None
+
+def is_within_polygon(node, polygon: shapely.Polygon) -> bool:
+    point = shapely.Point(node['y'], node['x'])
+    return point.within(polygon)
 
 # get intersection nodes whom osmid is not already in the list
 start_nodes = set()
@@ -56,10 +58,9 @@ for edge in wg.es:
     if is_intersection_edge(edge):
         source_node = wg.vs[edge.source]
         target_node = wg.vs[edge.target]
-        if source_node not in start_nodes:
-            start_nodes.add(source_node)
-        if target_node not in target_nodes:
-            target_nodes.add(target_node)
+
+        start_nodes.add(source_node)
+        target_nodes.add(source_node)
 
 print(f'total number of nodes: {len(wg.vs)}')
 print(f'found {len(start_nodes)} start nodes')
@@ -67,15 +68,6 @@ print(f'found {len(target_nodes)} target nodes')
 
 #assert len(start_nodes) + len(target_nodes) == len(wg.vs), f"sum of start and target nodes ({len(start_nodes) + len(target_nodes)}) does not equal total number of nodes ({len(wg.vs)})"
 
-#%%
-duplicated_nodes = list()
-for node in start_nodes:
-    if node in target_nodes:
-        duplicated_nodes.append(node)
-
-print(f'found {len(duplicated_nodes)} duplicated nodes')
-
-#%%
 def get_shifted_point(node):
     y = node['y_reversed']
     x = node['x_reversed']
@@ -93,24 +85,37 @@ gpd.GeoDataFrame({'osmid': [node['osmid'] for node in start_nodes], 'node_id': [
 
 gpd.GeoDataFrame({'osmid': [node['osmid'] for node in target_nodes], 'node_id': [node.index for node in target_nodes], 'geometry': [get_shifted_point(node) for node in target_nodes]}, geometry='geometry', crs='EPSG:4326').to_file('ebc_debug.gpkg', layer='target_nodes', driver='GPKG')
 
-gpd.GeoDataFrame({'osmid': [node['osmid'] for node in duplicated_nodes], 'node_id': [node.index for node in duplicated_nodes], 'geometry': [get_shifted_point(node) for node in duplicated_nodes]}, geometry='geometry', crs='EPSG:4326').to_file('ebc_debug.gpkg', layer='duplicated_nodes', driver='GPKG')
+#gpd.GeoDataFrame({'osmid': [node['osmid'] for node in duplicated_nodes], 'node_id': [node.index for node in duplicated_nodes], 'geometry': [get_shifted_point(node) for node in duplicated_nodes]}, geometry='geometry', crs='EPSG:4326').to_file('ebc_debug.gpkg', layer='duplicated_nodes', driver='GPKG')
 
-#%%
+# %%
 
 start = time.time()
-ebc = wg.edge_betweenness_limit(directed=True, distances="length", edge_weights="weight", sources=start_nodes, targets=target_nodes, population_weights="population", lower_limit=0, upper_limit=4500, normalized=False)
+ebc = wg.edge_betweenness_weighted(directed=True, distances="weight", edge_weights="weight", sources=start_nodes, targets=target_nodes, node_weights="population", lower_limit=1000, upper_limit=4500, normalized=False)
 end = time.time()
 print(f'calculated edge betweenness centrality in {end - start} seconds')
 
 #%%
 start = time.time()
-ebc_cutoff = wg.edge_betweenness(directed=True, weights="weight", cutoff=4500, normalized=False)
+ebc_cutoff = wg.edge_betweenness(directed=True, weights="weight", normalized=False)
 end = time.time()
 print(f'calculated edge betweenness centrality in {end - start} seconds')
 # %%
-ebc
+# normalize ebc values
+norm_ebc = np.divide(ebc, max(ebc))
 #%%
-ebc_cutoff
+ebc_cutoff = np.divide(ebc_cutoff, max(ebc_cutoff))
+
+# %%
+ebc_diff = np.subtract(norm_ebc, ebc_cutoff)
+ebc_diff = np.add(ebc_diff, 1.0)
+ebc_diff = np.divide(ebc_diff, 2.0)
+
+print(f'max ebc diff: {max(ebc_diff)}')
+print(f'min ebc diff: {min(ebc_diff)}')
+#%%
+cmap = matplotlib.colors.LinearSegmentedColormap.from_list('blue_red_transparent', [(0, ('blue', 1.0)), (0.5, 'none'), (1, ('red', 1.0))], N=256)
+
+cmap
 # %%
 def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], expanded: bool = False) -> gpd.GeoDataFrame:
     cmap = plt.get_cmap('turbo')
@@ -140,6 +145,7 @@ def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], e
     attributes = {
         'count': [], 
         'color': [], 
+        'transparency': [],
         'osmid': [], 
         'weight': [], 
         'length': [], 
@@ -161,8 +167,10 @@ def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], e
                 except KeyError:
                     pass
             attributes['count'].append(count)
-            color = matplotlib.colors.to_hex(cmap(count/max_value))
+            color = matplotlib.colors.to_hex(cmap(count))
+            transparency = cmap(count)[3]
             attributes['color'].append(color)
+            attributes['transparency'].append(transparency)
             attributes['osmid'].append(graph.edges[idx].get('osmid', None))
             weight = graph.edges[idx].get('weight', None)
             attributes['weight'].append(weight)
@@ -188,9 +196,8 @@ def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], e
     return edges_df#.reset_index(drop=True)
 
 # %%
-plot_edge_betweenness_centrality(routing_graph, ebc, expanded=True).to_file('ebc_debug.gpkg', layer='ebc_subset_limit_population', driver='GPKG')
+plot_edge_betweenness_centrality(routing_graph, ebc_cutoff, expanded=True).to_file('ebc_debug.gpkg', layer='ebc_weight', driver='GPKG')
 # %%
-import numpy as np
 
 max_ebc = np.max(ebc)
 max_ebc_cutoff = np.max(ebc_cutoff)
@@ -200,7 +207,6 @@ print(f'max ebc cutoff: {max_ebc_cutoff}')
 
 ebc_normalized = [value / max_ebc for value in ebc]
 ebc_cutoff_normalized = [value / max_ebc_cutoff for value in ebc_cutoff]
-
 
 # %%
 ebc_normalized
