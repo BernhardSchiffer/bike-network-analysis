@@ -233,115 +233,74 @@ finishing_points = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').to_c
 df = df[starting_points.distance(finishing_points) > 100]
 
 df
-# %%
-# calculate shortest routes and plot on map
-trips = df.head(10000)
-print(f'{len(trips)} trips')
-
-wg = ig.Graph.from_networkx(graph)
-nx_to_igraph_node_id_map = {node['_nx_name']: node for node in wg.vs}
-
-starting_positions = trips['starting_position']
-finishing_positions = trips['finishing_position']
-
-print('start calculating nearest nodes')
-start = time.time()
-x = [p.x for p in starting_positions]
-y = [p.y for p in starting_positions]
-starting_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
-
-starting_node_ids = [nx_to_igraph_node_id_map[node_id] for node_id in starting_node_ids]
-
-x = [p.x for p in finishing_positions]
-y = [p.y for p in finishing_positions]
-finishing_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
-
-finishing_node_ids = [nx_to_igraph_node_id_map[node_id] for node_id in finishing_node_ids]
-
-end = time.time()
-print(f'finished calculating nearest nodes in {end - start} seconds')
-
-shortest_paths = []
-
-print('start calculating routes')
-start = time.time()
-for v, to in tqdm(zip(starting_node_ids, finishing_node_ids), desc='calculating shortest paths', unit='route'):
-    shortest_paths.append(wg.get_shortest_path(v=v, to=to, weights='weight'))
-end = time.time()
-print(f'finished calculating routes in {end - start} seconds')
 
 # %%
-# calculate shortest routes and plot on map
-trips = df.head(10000)
-print(f'{len(trips)} trips')
+chunk_size = 100000
+for i in range(0, len(df), chunk_size):
+    # calculate shortest routes
+    trips = df[i:i+chunk_size]
+    print(f'{len(trips)} trips')
 
-starting_positions = trips['starting_position']
-finishing_positions = trips['finishing_position']
+    starting_positions = trips['starting_position']
+    finishing_positions = trips['finishing_position']
 
-print('start calculating nearest nodes')
-start = time.time()
-x = [p.x for p in starting_positions]
-y = [p.y for p in starting_positions]
-starting_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
+    print('start calculating nearest nodes')
+    start = time.time()
+    x = [p.x for p in starting_positions]
+    y = [p.y for p in starting_positions]
+    starting_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
 
-x = [p.x for p in finishing_positions]
-y = [p.y for p in finishing_positions]
-finishing_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
-end = time.time()
-print(f'finished calculating nearest nodes in {end - start} seconds')
+    x = [p.x for p in finishing_positions]
+    y = [p.y for p in finishing_positions]
+    finishing_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
+    end = time.time()
+    print(f'finished calculating nearest nodes in {end - start} seconds')
 
-# calculate direct route between starting and finishing nodes
-# the lookup in the graph, i.e. in the a star algorithm, is too much overhead be more efficient than the djikstra algorithm
-def distance(a, b):
-    a = graph.nodes[a]
-    b = graph.nodes[b]
-    return ox.distance.euclidean(a['y'], a['x'], b['y'], b['x'])
+    print('start calculating routes')
+    start = time.time()
+    shortest_routes = ox.shortest_path(graph, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT, weight='length')
+    end = time.time()
+    print(f'finished calculating routes in {end - start} seconds')
 
-print('start calculating routes')
-start = time.time()
-shortest_routes = ox.shortest_path(graph, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT, weight='length')
-end = time.time()
-print(f'finished calculating routes in {end - start} seconds')
-
-# %%
-# write calculated routes on file
-file = open('calculated_shortest_routes.pickle', 'wb')
-pickle.dump(shortest_routes, file)
-file.close()
+    # append calculated routes to file
+    file = open('calculated_shortest_routes.pickle', 'ab')
+    pickle.dump(shortest_routes, file)
+    file.close()
 
 # %%
 plot_heat_map_of_edges([ s for s in shortest_routes if correct_routes(s)], graph).save('shortest_routes.html')
 
 # %%
-# calculate trips based on the new weight metric based on osm features
-trips = df.head(10000)
-print(f'{len(trips)} trips')
+chunk_size = 100000
+for i in range(0, len(df), chunk_size):
+    # calculate trips based on the new weight metric based on osm features
+    trips = df[i:i+chunk_size]
 
-starting_positions = trips['starting_position']
-finishing_positions = trips['finishing_position']
+    starting_positions = trips['starting_position']
+    finishing_positions = trips['finishing_position']
 
-print('start calculating nearest nodes')
-start = time.time()
-x = [p.x for p in starting_positions]
-y = [p.y for p in starting_positions]
-starting_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
+    print('start calculating nearest nodes')
+    start = time.time()
+    x = [p.x for p in starting_positions]
+    y = [p.y for p in starting_positions]
+    starting_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
 
-x = [p.x for p in finishing_positions]
-y = [p.y for p in finishing_positions]
-finishing_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
-end = time.time()
-print(f'finished calculating nearest nodes in {end - start} seconds')
+    x = [p.x for p in finishing_positions]
+    y = [p.y for p in finishing_positions]
+    finishing_node_ids = osmnx.distance.nearest_nodes(graph, x, y)
+    end = time.time()
+    print(f'finished calculating nearest nodes in {end - start} seconds')
 
-print('start calculating routes')
-start = time.time()
-routes = osmnx.routing.shortest_path(graph, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT, weight='weight')
-end = time.time()
-print(f'finished calculating routes in {end - start} seconds')
-# %%
-# write calculated routes on file
-file = open('calculated_routes.pickle', 'wb')
-pickle.dump(routes, file)
-file.close()
+    print('start calculating routes')
+    start = time.time()
+    routes = osmnx.routing.shortest_path(graph, starting_node_ids, finishing_node_ids, cpus=CPU_COUNT, weight='weight')
+    end = time.time()
+    print(f'finished calculating routes in {end - start} seconds')
+
+    # write calculated routes on file
+    file = open('calculated_routes.pickle', 'ab')
+    pickle.dump(routes, file)
+    file.close()
 
 # %%
 # plot heatmap of calculated routes
