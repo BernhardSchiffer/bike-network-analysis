@@ -132,3 +132,63 @@ gpdf_nbg = gpd.GeoDataFrame(gpdf_end_within_nbg, geometry='starting_position', c
 
 gpdf_nbg
 # %%
+# get number of rides that start at a station and end at a station
+station_rentals = df_all[(df_all['Rental place']) & (df_all['finishing_station_id'].notnull())]
+
+#%%
+# number of rentals that start or end at a station
+station_starts = ~df_all['Rental place'].str.startswith('BIKE')
+station_destinations = ~df_all['Return place'].str.startswith('BIKE')
+
+print(f'Number of rentals that start at a station: {station_starts.sum()}')
+print(f'Number of rentals that end at a station: {station_destinations.sum()}')
+
+station_rentals = df_all[station_starts & station_destinations]
+print(f'Number of rentals that start and end at a station: {len(station_rentals)}')
+station_rentals
+# %%
+# most popular stations
+station_starts = ~df_all['Rental place'].str.startswith('BIKE')
+station_destinations = ~df_all['Return place'].str.startswith('BIKE')
+
+# get most popular starting stations
+popular_starting_stations = df_all[station_starts]['Rental place'].value_counts().head(10)
+print('Most popular starting stations:')
+print(popular_starting_stations)
+
+print('---')
+# get most popular destination stations
+popular_destination_stations = df_all[station_destinations]['Return place'].value_counts().head(10)
+print('Most popular destination stations:')
+print(popular_destination_stations)
+# %%
+# get most popular station-to-station routes
+station_starts = ~df_all['Rental place'].str.startswith('BIKE')
+station_destinations = ~df_all['Return place'].str.startswith('BIKE')
+
+station_rentals = df_all[station_starts & station_destinations]
+popular_routes = station_rentals.groupby(['Rental place', 'Return place']).size().sort_values(ascending=False).head(10)
+print('Most popular station-to-station routes:')
+print(popular_routes)
+# %%
+# get rentals that start and end inside the flexzone
+from utils.vag_rad_utils import get_vag_rad_flexzone, vag_rad_city_ids
+flexzone_nbg = get_vag_rad_flexzone(vag_rad_city_ids['Nürnberg'])
+
+starting_in_flexzone = gpd.GeoSeries(df_all['starting_position'], crs='EPSG:4326').within(flexzone_nbg)
+ending_in_flexzone = gpd.GeoSeries(df_all['finishing_position'], crs='EPSG:4326').within(flexzone_nbg)
+
+flexzone_rentals = df_all[starting_in_flexzone & ending_in_flexzone]
+print(f'Number of rentals that start and end within the flexzone: {len(flexzone_rentals)}')
+
+# get rentals that start inside the flexzone but end outside
+print(f'Number of rentals that start within the flexzone but end outside: {len(df_all[starting_in_flexzone & ~ending_in_flexzone])}')
+
+# get rentals that end inside the flexzone but start outside
+print(f'Number of rentals that end within the flexzone but start outside: {len(df_all[~starting_in_flexzone & ending_in_flexzone])}')
+
+# rentals outside of the flexzone
+outside_flexzone_rentals = df_all[~starting_in_flexzone & ~ending_in_flexzone]
+print(f'Number of rentals that start and end outside the flexzone: {len(outside_flexzone_rentals)}')
+# %%
+
