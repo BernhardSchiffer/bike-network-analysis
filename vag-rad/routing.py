@@ -18,7 +18,6 @@ import time
 from utils.utils import *
 from utils.graph_types import *
 from utils.visualization_utils import plot_graph, plot_shifted_graph, plot_edge_betweenness_centrality
-from utils.overpass_utils import fetch_city_polygon
 import pickle
 import numpy as np
 import igraph as ig
@@ -226,7 +225,7 @@ chunk_size = 100000
 for i in range(0, len(df), chunk_size):
     # calculate shortest routes
     trips = df[i:i+chunk_size]
-    print(f'{len(trips)} trips')
+    print(f'computed {i}/{len(df)} trips for shortest routes')
 
     starting_positions = trips['starting_position']
     finishing_positions = trips['finishing_position']
@@ -262,6 +261,7 @@ chunk_size = 100000
 for i in range(0, len(df), chunk_size):
     # calculate trips based on the new weight metric based on osm features
     trips = df[i:i+chunk_size]
+    print(f'computed {i}/{len(df)} trips for shortest routes')
 
     starting_positions = trips['starting_position']
     finishing_positions = trips['finishing_position']
@@ -306,13 +306,24 @@ plot_heat_map_of_edges(valid_routes, graph, expanded=True).to_file(filename='gra
 
 # %%
 # load calculated routes from file
+routes = []
 with open('calculated_routes.pickle', 'rb') as f:
-    routes = pickle.load(f)
+    while 1:
+        try:
+            routes.extend(pickle.load(f))
+        except EOFError:
+            break
+print(f'loaded {len(routes)} routes from file')
 
 # load calculated routes from file
+shortest_routes = []
 with open('calculated_shortest_routes.pickle', 'rb') as f:
-    shortest_routes = pickle.load(f)
-
+    while 1:
+        try:
+            shortest_routes.extend(pickle.load(f))
+        except EOFError:
+            break
+print(f'loaded {len(shortest_routes)} shortest routes from file')
 # %%
 routes = {idx: r for idx, r in enumerate(routes)}
 shortest_routes = {idx: r for idx, r in enumerate(shortest_routes)}
