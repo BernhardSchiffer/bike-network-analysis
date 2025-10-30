@@ -5,6 +5,8 @@ import geopandas as gpd
 import shapely.geometry
 import numpy as np
 from utils.overpass_utils import fetch_city_polygon
+from utils.vag_rad_utils import get_vag_rad_flexzone, vag_rad_city_ids
+import time
 
 # %%
 # Ausleihen 2019 und 2020
@@ -209,22 +211,42 @@ df['finishing_position'] = shapely.from_wkt(df['finishing_position'])
 
 df = gpd.GeoDataFrame(df, geometry='starting_position', crs='EPSG:4326')
 
+print('calculating straight-line distances...')
 # change crs of geoSeries to epsg 25832
 starting_points = gpd.GeoSeries(df['starting_position'], crs='EPSG:4326').to_crs(epsg=25832)
 finishing_points = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').to_crs(epsg=25832)
 
-# filter entries where the distance between starting and finishing position is more than 100 meters
-df = df[starting_points.distance(finishing_points) > 100]
+# calculate straight-line distances between starting and finishing positions
+start = time.time()
+distances = starting_points.distance(finishing_points)
+df['distance_m'] = distances
+print(f'Calculated distances for {len(df)} rows in {time.time() - start:.2f} seconds')
+print('---')
 
-df
-
-# %%
-# filter all rows where starting or finishing is within the polygon of nuremberg
+# calculate if positions are within nuremberg city polygon
+print('calculating if positions are within Nürnberg city polygon...')
 nbg_polygon = fetch_city_polygon('Nürnberg')
 
+start = time.time()
 starting_positions_in_nbg = gpd.GeoSeries(df['starting_position'], crs='EPSG:4326').within(nbg_polygon)
 finishing_positions_in_nbg = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').within(nbg_polygon)
+df['starting_in_nbg'] = starting_positions_in_nbg
+df['finishing_in_nbg'] = finishing_positions_in_nbg
+print(f'Calculated if positions are within Nürnberg for {len(df)} rows in {time.time() - start:.2f} seconds')
+print('---')
 
+# calculate if positions are within nuremberg free floating zone
+print('calculating if positions are within Nürnberg flexzone...')
+flexzone_nbg = get_vag_rad_flexzone(vag_rad_city_ids['Nürnberg'])
+
+start = time.time()
+starting_in_flexzone = gpd.GeoSeries(df['starting_position'], crs='EPSG:4326').within(flexzone_nbg)
+ending_in_flexzone = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').within(flexzone_nbg)
+df['starting_in_flexzone'] = starting_in_flexzone
+df['ending_in_flexzone'] = ending_in_flexzone
+print(f'Calculated if positions are within Nürnberg flexzone for {len(df)} rows in {time.time() - start:.2f} seconds')
+print('---')
+
+# saving pre-calculated columns to csv
+df.to_csv('vag-rad-data/processed/All_Ausleihen_Kundendetails.csv', index=False)
 # %%
-df = df[starting_positions_in_nbg | finishing_positions_in_nbg]
-df.to_csv('vag-rad-data/processed/All_Filtered_Ausleihen_Kundendetails.csv', index=False)

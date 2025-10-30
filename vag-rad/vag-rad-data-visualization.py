@@ -3,23 +3,20 @@
 import pandas as pd
 import geopandas as gpd
 import shapely
-from utils.overpass_utils import fetch_city_polygon
+import matplotlib.pyplot as plt
+import calendar
 
 # %%
-# fetch city polygon for nuremberg
-nbg_polygon = fetch_city_polygon('Nürnberg')
-
 # merge all years into a single dataframe
-df_2019_2020 = pd.read_csv('vag-rad-data/processed/2019_2020_Ausleihen_Kundendetails.csv')
-df_2021 = pd.read_csv('vag-rad-data/processed/2021_Ausleihen_Kundendetails.csv')
-df_2022 = pd.read_csv('vag-rad-data/processed/2022_Ausleihen_Kundendetails.csv')
-df_2023 = pd.read_csv('vag-rad-data/processed/2023_Ausleihen_Kundendetails.csv')
-df_2024 = pd.read_csv('vag-rad-data/processed/2024_Ausleihen_Kundendetails.csv')
-
-df_all = pd.concat([df_2019_2020, df_2021, df_2022, df_2023, df_2024], ignore_index=True)
+df_all = pd.read_csv('vag-rad-data/processed/All_Ausleihen_Kundendetails.csv')
 
 df_all['starting_position'] = shapely.from_wkt(df_all['starting_position'])
 df_all['finishing_position'] = shapely.from_wkt(df_all['finishing_position'])
+
+df_all['Start time'] = pd.to_datetime(df_all['Start time'])
+df_all['End time'] = pd.to_datetime(df_all['End time'])
+
+df_all
 
 # %%
 print(f'Total number of rentals from 2019 to 2024: {len(df_all)}')
@@ -28,29 +25,17 @@ minutes, seconds = divmod(median_duration.total_seconds(), 60)
 print(f'Median rental duration: {int(minutes)} minutes and {int(seconds)} seconds')
 
 # %%
-# map starting and finishing positions from wkt
-df_all['starting_position'] = gpd.GeoSeries.from_wkt(df_all['starting_position'], crs='EPSG:4326')
-df_all['finishing_position'] = gpd.GeoSeries.from_wkt(df_all['finishing_position'], crs='EPSG:4326')
-
-#%%
 # calculate straight-line distances between starting and finishing positions
-distances = gpd.GeoDataFrame(df_all[['starting_position', 'finishing_position']], crs='EPSG:4326', geometry='starting_position')
+distances = df_all['distance_m']
 
-# transform starting and finishing positions to epsg 25832 for distance calculation
-distances['starting_position'] = distances['starting_position'].to_crs(epsg=25832)
-distances['finishing_position'] = distances['finishing_position'].to_crs(epsg=25832)
+print(f'Median straight-line distance between starting and finishing positions (in meters): {distances.median():.2f}')
 
-# calculate distances between starting and finishing positions in meters
-distances['distance_m'] = distances.apply(lambda row: row['starting_position'].distance(row['finishing_position']), axis=1)
-
-print(f'Median straight-line distance between starting and finishing positions (in meters): {distances["distance_m"].median():.2f}')
-
-distances['distance_m'].plot.hist(bins=100, range=(100, 5000), title='Histogram of straight-line distances between starting and finishing positions', xlabel='Distance (m)', ylabel='Number of rentals')
+distances.plot.hist(bins=100, range=(100, 5000), title='Histogram of straight-line distances between starting and finishing positions', xlabel='Distance (m)', ylabel='Number of rentals')
 
 # %%
 # time per distance
-durations = df_all['Duration']  # in seconds
-speeds_m_per_s = distances['distance_m'] / durations
+rentals = df_all[df_all['distance_m'] > 100]
+speeds_m_per_s = rentals['distance_m'] / rentals['Duration']
 speeds_km_per_h = speeds_m_per_s * 3.6
 
 print(f'Median speed (km/h): {speeds_km_per_h.median():.2f}')
@@ -58,7 +43,6 @@ speeds_km_per_h.plot.hist(bins=100, range=(0, 25), title='Histogram of average s
 
 # %%
 # plot rentals per year use groupby
-df_all['Start time'] = pd.to_datetime(df_all['Start time'])
 df_all['year'] = df_all['Start time'].dt.year
 rentals_per_year = df_all.groupby('year').size()
 rentals_per_year.plot.bar(title='Number of rentals per year', xlabel='Year', ylabel='Number of rentals')
@@ -75,12 +59,14 @@ daily_rentals = daily_rentals.groupby(['year', 'month', 'day', 'hour']).size().r
 
 # plot rentals per hour of day
 hourly_rentals = daily_rentals.groupby('hour')['rentals'].mean()
-hourly_rentals.plot.bar(title='Average number of rentals per hour of day', xlabel='Hour of day', ylabel='Average number of rentals')
+plt.bar(hourly_rentals.index, hourly_rentals.values)
+plt.title('Average number of rentals per hour of day')
+plt.xlabel('Hour of day')
+plt.xticks(range(0, 24, 2), rotation=0)
+plt.ylabel('Average number of rentals')
+plt.show()
 
 # %%
-import matplotlib.pyplot as plt
-import calendar
-
 daily_rentals = pd.DataFrame()
 daily_rentals['year'] = df_all['Start time'].dt.year
 daily_rentals['month'] = df_all['Start time'].dt.month
@@ -103,8 +89,8 @@ for day in range(7):
     day_name = calendar.day_name[day]
     plt.title(f'{day_name}')
     plt.xlabel('Hour of day')
+    plt.xticks(range(0, 24, 2), rotation=0)
     plt.ylabel('Average number of rentals')
-    # make the yticks from 0 to 1100
     plt.ylim(0, 1100)
 
 plt.tight_layout()
@@ -117,24 +103,8 @@ gpd.GeoDataFrame(df_all['starting_position'], geometry='starting_position').to_f
 gpd.GeoDataFrame(df_all['finishing_position'], geometry='finishing_position').to_file('vag-rad-rentals.gpkg', layer='finishing_position', driver='GPKG')
 
 # %%
-
 # get all rentals that start and end within nuremberg city polygon
-gpdf_start_within_nbg = gpd.GeoDataFrame(df_all, geometry='starting_position', crs='EPSG:4326')
-
-gpdf_start_within_nbg = gpdf_start_within_nbg[gpdf_start_within_nbg['starting_position'].within(nbg_polygon)]
-
-gpdf_end_within_nbg = gpd.GeoDataFrame(gpdf_start_within_nbg, geometry='finishing_position', crs='EPSG:4326')
-
-gpdf_end_within_nbg = gpdf_end_within_nbg[gpdf_end_within_nbg['finishing_position'].within(nbg_polygon)]
-
-# join both dataframes to get rentals that start and end within nuremberg
-gpdf_nbg = gpd.GeoDataFrame(gpdf_end_within_nbg, geometry='starting_position', crs='EPSG:4326')
-
-gpdf_nbg
-# %%
-# get number of rides that start at a station and end at a station
-station_rentals = df_all[(df_all['Rental place']) & (df_all['finishing_station_id'].notnull())]
-
+df_all = df_all[df_all['starting_in_nbg'] & df_all['finishing_in_nbg']]
 #%%
 # number of rentals that start or end at a station
 station_starts = ~df_all['Rental place'].str.startswith('BIKE')
@@ -172,12 +142,8 @@ print('Most popular station-to-station routes:')
 print(popular_routes)
 # %%
 # get rentals that start and end inside the flexzone
-from utils.vag_rad_utils import get_vag_rad_flexzone, vag_rad_city_ids
-flexzone_nbg = get_vag_rad_flexzone(vag_rad_city_ids['Nürnberg'])
-
-starting_in_flexzone = gpd.GeoSeries(df_all['starting_position'], crs='EPSG:4326').within(flexzone_nbg)
-ending_in_flexzone = gpd.GeoSeries(df_all['finishing_position'], crs='EPSG:4326').within(flexzone_nbg)
-
+starting_in_flexzone = df_all['starting_in_flexzone']
+ending_in_flexzone = df_all['ending_in_flexzone']
 flexzone_rentals = df_all[starting_in_flexzone & ending_in_flexzone]
 print(f'Number of rentals that start and end within the flexzone: {len(flexzone_rentals)}')
 
@@ -190,5 +156,10 @@ print(f'Number of rentals that end within the flexzone but start outside: {len(d
 # rentals outside of the flexzone
 outside_flexzone_rentals = df_all[~starting_in_flexzone & ~ending_in_flexzone]
 print(f'Number of rentals that start and end outside the flexzone: {len(outside_flexzone_rentals)}')
-# %%
 
+# get rentals that end outside the flexzone but not at a station
+ending_not_at_station = df_all['Return place'].str.startswith('BIKE')
+ending_outside_flexzone = df_all[starting_in_flexzone & ~ending_in_flexzone & ending_not_at_station]
+print(f'Number of rentals that end outside the flexzone and not at a station: {len(ending_outside_flexzone)}')
+
+# %%
