@@ -3,9 +3,11 @@
 import osmnx as ox
 import igraph as ig
 import time
-from utils.utils import parse_junction_osmid, parse_old_edge_key, get_reversed_key
+from utils.utils import parse_junction_osmid, parse_old_edge_key, get_reversed_key, buffer_in_meters
 from utils.visualization_utils import plot_graph, plot_shifted_graph
+from utils.overpass_utils import fetch_city_polygon
 import shapely
+import pandas as pd
 import geopandas as gpd
 import networkx as nx
 from collections import Counter
@@ -15,6 +17,7 @@ from tqdm import tqdm
 from utils.population_provider import GHSLPopulationProvider
 from tqdm import tqdm
 import numpy as np
+import momepy as mp
 
 #%%
 # load graph from file
@@ -24,8 +27,81 @@ routing_graph = ox.load_graphml('simplified_bicycle_graph.graphml', node_dtypes=
 # add population data to nodes
 population_provider = GHSLPopulationProvider()
 for n in routing_graph.nodes:
-    population = population_provider.get_population_at_point(shapely.Point(routing_graph.nodes[n]["x"], routing_graph.nodes[n]["y"]))
+    population = population_provider.get_population_at_point(shapely.Point(routing_graph.nodes[n]['x'], routing_graph.nodes[n]['y']))
     routing_graph.nodes[n]['population'] = population
+
+# %%
+def get_edge_tessellation(graph: nx.MultiDiGraph, area: shapely.Polygon) -> gpd.GeoDataFrame:
+    edges: gpd.GeoDataFrame = ox.graph_to_gdfs(graph, nodes=False)
+    area = gpd.GeoSeries([area], crs='EPSG:4326').to_crs('32633').iloc[0]
+
+    # remove intersection edges. edges that habe 'turning_angle' attribute
+    to_remove_edges = []
+    for s, d, k, data in graph.edges(data=True, keys=True):
+        try:
+            data['turning_angle']
+            to_remove_edges.append((s, d, k))
+        except KeyError:
+            pass
+    edges = edges.drop(to_remove_edges).to_crs('32633')
+
+    assert not edges.crs.is_geographic 
+
+    tess = mp.Tessellation(edges, 'osmid', area)
+    return tess.tessellation
+
+def get_node_area_weights(graph: nx.MultiDiGraph, area: shapely.Polygon) -> pd.Series:
+    nodes, edges = ox.graph_to_gdfs(graph, nodes=True, edges=True)
+
+    tessalation = get_edge_tessellation(graph, area)
+    tessalation['area'] = tessalation.geometry.area
+
+    tessalation = tessalation.set_index('osmid')
+
+    for idx, row in edges.iterrows():
+        osm_id = row['osmid']
+        # add area to rows
+        try:
+            tess_area = tessalation.loc[osm_id]['area']
+            edges.at[idx, 'tess_area'] = tess_area
+        except KeyError:
+            edges.at[idx, 'tess_area'] = 0.0
+
+    from_nodes = edges.groupby('u')['tess_area'].sum() / 2
+    to_nodes = edges.groupby('v')['tess_area'].sum() / 2
+
+    node_area_weights = from_nodes.add(to_nodes, fill_value=0)
+    node_osmids = nodes['osmid']
+
+    # join node osmid with area weights
+    node_area_weights = node_area_weights.to_frame().join(node_osmids, how='left')
+    node_area_weights.columns = ['area_weight', 'osmid']
+
+    return node_area_weights.groupby('osmid')['area_weight'].sum()
+
+# %%
+# add area weights to nodes
+place_name = 'Nürnberg'
+nbg_area = fetch_city_polygon(place_name)
+
+nbg_area: shapely.Polygon = buffer_in_meters(nbg_area, 4050)
+
+#get_edge_tessellation(routing_graph, nbg_area).to_crs('EPSG:4326').to_file('ebc.gpkg', layer='tessellation', driver='GPKG')
+
+node_area_weights_file = 'node_area_weights.pkl'
+try:
+    node_weights = pd.read_pickle(node_area_weights_file)
+except FileNotFoundError:
+    node_weights = get_node_area_weights(routing_graph, nbg_area)
+    node_weights.to_pickle(node_area_weights_file)
+
+for node, data in routing_graph.nodes(data=True):
+    osmid = data['osmid']
+    try:
+        area_weight = node_weights[osmid]
+        routing_graph.nodes[node]['area_weight'] = area_weight
+    except KeyError:
+        routing_graph.nodes[n]['area_weight'] = 0.0
 
 #%%
 wg: ig.Graph = ig.Graph.from_networkx(routing_graph)
@@ -81,29 +157,23 @@ def get_shifted_point(node):
     
     return shapely.Point(node['x'], node['y'])
 
-gpd.GeoDataFrame({'osmid': [node['osmid'] for node in start_nodes], 'node_id': [node.index for node in start_nodes], 'geometry': [get_shifted_point(node) for node in start_nodes]}, geometry='geometry', crs='EPSG:4326').to_file('ebc_debug.gpkg', layer='start_nodes', driver='GPKG')
+gpd.GeoDataFrame({'osmid': [node['osmid'] for node in start_nodes], 'node_id': [node.index for node in start_nodes], 'geometry': [get_shifted_point(node) for node in start_nodes]}, geometry='geometry', crs='EPSG:4326').to_file('ebc.gpkg', layer='start_nodes', driver='GPKG')
 
-gpd.GeoDataFrame({'osmid': [node['osmid'] for node in target_nodes], 'node_id': [node.index for node in target_nodes], 'geometry': [get_shifted_point(node) for node in target_nodes]}, geometry='geometry', crs='EPSG:4326').to_file('ebc_debug.gpkg', layer='target_nodes', driver='GPKG')
-
-#gpd.GeoDataFrame({'osmid': [node['osmid'] for node in duplicated_nodes], 'node_id': [node.index for node in duplicated_nodes], 'geometry': [get_shifted_point(node) for node in duplicated_nodes]}, geometry='geometry', crs='EPSG:4326').to_file('ebc_debug.gpkg', layer='duplicated_nodes', driver='GPKG')
+gpd.GeoDataFrame({'osmid': [node['osmid'] for node in target_nodes], 'node_id': [node.index for node in target_nodes], 'geometry': [get_shifted_point(node) for node in target_nodes]}, geometry='geometry', crs='EPSG:4326').to_file('ebc.gpkg', layer='target_nodes', driver='GPKG')
 
 # %%
-
 start = time.time()
-ebc = wg.edge_betweenness_weighted(directed=True, distances="weight", edge_weights="weight", sources=start_nodes, targets=target_nodes, node_weights="population", lower_limit=1000, upper_limit=4500, normalized=False)
+ebc = wg.edge_betweenness_weighted(directed=True, distances="weight", edge_weights="weight", sources=start_nodes, targets=target_nodes, node_weights="population", lower_limit=0, upper_limit=4500, normalized=False)
 end = time.time()
 print(f'calculated edge betweenness centrality in {end - start} seconds')
-
-#%%
-start = time.time()
-ebc_cutoff = wg.edge_betweenness(directed=True, weights="weight", normalized=False)
-end = time.time()
-print(f'calculated edge betweenness centrality in {end - start} seconds')
-# %%
-# normalize ebc values
 norm_ebc = np.divide(ebc, max(ebc))
+
 #%%
-ebc_cutoff = np.divide(ebc_cutoff, max(ebc_cutoff))
+start = time.time()
+ebc_cutoff = wg.edge_betweenness(directed=True, weights="weight", cutoff=4500, normalized=False)
+end = time.time()
+print(f'calculated edge betweenness centrality in {end - start} seconds')
+#ebc_cutoff = np.divide(ebc_cutoff, max(ebc_cutoff))
 
 # %%
 ebc_diff = np.subtract(norm_ebc, ebc_cutoff)
@@ -112,16 +182,13 @@ ebc_diff = np.divide(ebc_diff, 2.0)
 
 print(f'max ebc diff: {max(ebc_diff)}')
 print(f'min ebc diff: {min(ebc_diff)}')
-#%%
-cmap = matplotlib.colors.LinearSegmentedColormap.from_list('blue_red_transparent', [(0, ('blue', 1.0)), (0.5, 'none'), (1, ('red', 1.0))], N=256)
 
-cmap
 # %%
 def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], expanded: bool = False) -> gpd.GeoDataFrame:
     cmap = plt.get_cmap('turbo')
     edges_counter = Counter()
 
-    for edge, count in tqdm(zip(graph.edges, ebc), desc='count edges', unit='route'):
+    for edge, count in zip(graph.edges, ebc):
         edges_counter[edge] = count
 
     # collapse edges with same nodes ie. edges with different directions
@@ -167,8 +234,8 @@ def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], e
                 except KeyError:
                     pass
             attributes['count'].append(count)
-            color = matplotlib.colors.to_hex(cmap(count))
-            transparency = cmap(count)[3]
+            color = matplotlib.colors.to_hex(cmap(count/max_value))
+            transparency = cmap(count/max_value)[3]
             attributes['color'].append(color)
             attributes['transparency'].append(transparency)
             attributes['osmid'].append(graph.edges[idx].get('osmid', None))
@@ -196,125 +263,27 @@ def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], e
     return edges_df#.reset_index(drop=True)
 
 # %%
-plot_edge_betweenness_centrality(routing_graph, ebc_cutoff, expanded=True).to_file('ebc_debug.gpkg', layer='ebc_weight', driver='GPKG')
-# %%
-
-max_ebc = np.max(ebc)
-max_ebc_cutoff = np.max(ebc_cutoff)
-
-print(f'max ebc: {max_ebc}')
-print(f'max ebc cutoff: {max_ebc_cutoff}')
-
-ebc_normalized = [value / max_ebc for value in ebc]
-ebc_cutoff_normalized = [value / max_ebc_cutoff for value in ebc_cutoff]
+plot_edge_betweenness_centrality(routing_graph, ebc, expanded=True).to_file('ebc.gpkg', layer='ebc_0_4500_weight_population', driver='GPKG')
 
 # %%
-ebc_normalized
+area_weight = [routing_graph.nodes[n]['area_weight'] for n in routing_graph.nodes]
+print(f'max node weight: {max(area_weight)}')
+print(f'min node weight: {min(area_weight)}')
+print(f'total node weight: {sum(area_weight)}')
 # %%
-ebc_cutoff_normalized
-# %%
-np.subtract(ebc_normalized, ebc_cutoff_normalized)
-# %%
-populations = [routing_graph.nodes[n]['area_weight'] for n in routing_graph.nodes]
-print(f'max population: {max(populations)}')
-print(f'min population: {min(populations)}')
-print(f'total population: {sum(populations)}')
-print(f'area of nurenberg: {nbg_area.area}')
-# %%
-population_norm = {}
-total = sum(populations)
-for idx1, p1 in tqdm(enumerate(populations[:1000]), desc='normalize populations', unit='node'):
+area_weight_norm = {}
+total = sum(area_weight)
+for idx1, p1 in tqdm(enumerate(area_weight[:1000]), desc='normalize node weight', unit='node'):
     tmp = []
-    for idx2, p2 in enumerate(populations):
+    for idx2, p2 in enumerate(area_weight):
         if idx1 == idx2:
             tmp.append(0)
         tmp.append(p1 * (p2 / (total - p1)))
-    population_norm[idx1] = tmp
+    area_weight_norm[idx1] = tmp
 #%%
-for idx in population_norm:
-    x = sum(population_norm[idx])
-    if x > 1:
-        print(f'sum of normalized populations: {x}')
-# %%
+for idx in area_weight_norm:
+    print(max(area_weight_norm[idx]))
+    print(min(area_weight_norm[idx]))
+    print('---------')
 
-for i in population_norm:
-    print(i)
-    break
-
-# %%
-import momepy as mp
-from utils.population_provider import NurenbergDistrictPopulationProvider
-
-nbg_population_provider = NurenbergDistrictPopulationProvider()
-#%%
-nbg_area = nbg_population_provider.nuremberg_area
-
-nbg_area = gpd.GeoDataFrame(geometry=[nbg_area], crs='EPSG:4326').to_crs('32633').buffer(50).values[0]
-nbg_area
-# %%
-edges: gpd.GeoDataFrame = ox.graph_to_gdfs(routing_graph, nodes=False)
-
-# remove intersection edges. edges that habe 'turning_angle' attribute
-to_remove_edges = []
-for idx, row in edges.iterrows():
-    try:
-        s, d, k = idx
-        routing_graph.edges[s, d, k]['turning_angle']
-        to_remove_edges.append((s, d, k))
-    except KeyError:
-        pass
-edges = edges.drop(to_remove_edges)
-edges.to_crs('32633', inplace=True)
-# %%
-edges.crs.is_geographic
-#%%
-tess = mp.Tessellation(edges, 'osmid', nbg_area)
-# %%
-t = tess.tessellation
-t.to_crs('EPSG:4326').to_file('ebc_debug.gpkg', layer='tessellation', driver='GPKG')
-t['area'] = t.geometry.area
-t
-
-# %%
-t = t.set_index('osmid')
-t
-# %%
-for idx, row in edges.iterrows():
-    osm_id = row['osmid']
-    # add area to rows
-    try:
-        area = t.loc[osm_id]['area']
-        edges.at[idx, 'tess_area'] = area
-    except KeyError:
-        edges.at[idx, 'tess_area'] = 0.0
-#%%
-edges
-# %%
-from_nodes = edges.groupby('u')['tess_area'].sum() / 2
-to_nodes = edges.groupby('v')['tess_area'].sum() / 2
-# %%
-node_area_weights = from_nodes.add(to_nodes, fill_value=0)
-node_area_weights
-
-# %%
-# add node osmid 
-nodes = ox.graph_to_gdfs(routing_graph, edges=False)
-node_osmids = nodes['osmid']
-# %%
-# join node osmid with area weights
-node_area_weights = node_area_weights.to_frame().join(node_osmids, how='left')
-node_area_weights.columns = ['area_weight', 'osmid']
-node_area_weights
-# %%
-tmp = node_area_weights.groupby('osmid')['area_weight'].sum()
-# %%
-# get value from series
-#%%
-for node, data in routing_graph.nodes(data=True):
-    osmid = data['osmid']
-    try:
-        area_weight = tmp[osmid]
-        routing_graph.nodes[node]['area_weight'] = area_weight
-    except KeyError:
-        routing_graph.nodes[n]['area_weight'] = 0.0
 # %%

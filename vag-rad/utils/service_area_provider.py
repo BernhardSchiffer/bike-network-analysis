@@ -8,7 +8,7 @@ from utils.qgis_utils import get_network_coverage
 import time
 
 class ServiceAreaProvider():
-    def __init__(self, coverage_distance: float, buffer_value: float, routing_graph: nx.MultiDiGraph):
+    def __init__(self, coverage_distance: int, buffer_value: float, routing_graph: nx.MultiDiGraph):
         self.coverage_distance = coverage_distance
         self.buffer_value = buffer_value
         self.cache_file_name: str = 'service_areas.gpkg'

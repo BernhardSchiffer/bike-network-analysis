@@ -31,6 +31,7 @@ scraper/download_all.sh
 
 # binary pyton objects i.e. pre calculated routes
 *.pickle
+*.pkl
 
 # openstreetmap files
 *.osm.pbf
@@ -51,3 +52,6 @@ graphhopper/
 
 # vag-rad data files
 vag-rad-data/
+
+# rust target folder
+target/

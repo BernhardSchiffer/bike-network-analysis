@@ -521,12 +521,17 @@ ox.graph_to_gdfs(bicycle_graph, nodes=False, edges=True).to_file('graph.gpkg', l
 # %%
 # initialize gap evaluator
 population_provider = GHSLPopulationProvider()
-
+# %%
 service_area_provider = ServiceAreaProvider(
     coverage_distance=300,
     buffer_value=50,
     routing_graph=bicycle_graph)
 
+service_area_provider = ServiceAreaProvider(
+    coverage_distance=300,
+    buffer_value=30,
+    routing_graph=bicycle_graph)
+# %%
 gap_evaluator = GapEvaluator(
     population_provider,
     service_area_provider,
