@@ -1,10 +1,12 @@
 # %%
 # imports
-import pandas as pd
-import geopandas as gpd
-import shapely
-import matplotlib.pyplot as plt
 import calendar
+
+import geopandas as gpd
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import shapely
 
 # %%
 # merge all years into a single dataframe
@@ -24,13 +26,67 @@ median_duration = pd.to_timedelta(df_all["Duration"].median(), unit='s')
 minutes, seconds = divmod(median_duration.total_seconds(), 60)
 print(f'Median rental duration: {int(minutes)} minutes and {int(seconds)} seconds')
 
+minutes, seconds = divmod(df_all["Duration"].max(), 60)
+print(f'Maximum rental duration: {int(minutes)} minutes and {int(seconds)} seconds')
+
+minutes, seconds = divmod(df_all["Duration"].min(), 60)
+print(f'Minimum rental duration: {int(minutes)} minutes and {int(seconds)} seconds')
+
+# 50 percentiles
+p50 = pd.to_timedelta(df_all["Duration"].quantile(0.5), unit='s')
+p75 = pd.to_timedelta(df_all["Duration"].quantile(0.75), unit='s')
+p90 = pd.to_timedelta(df_all["Duration"].quantile(0.9), unit='s')
+p95 = pd.to_timedelta(df_all["Duration"].quantile(0.95), unit='s')
+p99 = pd.to_timedelta(df_all["Duration"].quantile(0.99), unit='s')
+print(f'50th percentile rental duration: {int(p50.total_seconds() // 60)} minutes and {int(p50.total_seconds() % 60)} seconds')
+print(f'75th percentile rental duration: {int(p75.total_seconds() // 60)} minutes and {int(p75.total_seconds() % 60)} seconds')
+print(f'90th percentile rental duration: {int(p90.total_seconds() // 60)} minutes and {int(p90.total_seconds() % 60)} seconds')
+print(f'95th percentile rental duration: {int(p95.total_seconds() // 60)} minutes and {int(p95.total_seconds() % 60)} seconds')
+print(f'99th percentile rental duration: {int(p99.total_seconds() // 60)} minutes and {int(p99.total_seconds() % 60)} seconds')
+
+durations = df_all['Duration']
+durations = np.divide(durations, 60)  # convert to minutes
+plt.figure(figsize=(10, 6))
+plt.hist(durations, bins=100, range=(0, 100))
+plt.title('Histogram of rental durations')
+plt.xlabel('Duration (min)')
+plt.xticks(range(0, 101, 5))
+plt.ylabel('Number of rentals')
+plt.grid()
+plt.show()
+
 # %%
 # calculate straight-line distances between starting and finishing positions
 distances = df_all['distance_m']
 
+plt.figure(figsize=(10, 6))
+plt.hist(distances, bins=100, range=(100, 5000))
+plt.title('Histogram of straight-line distances between starting and finishing positions')
+plt.xlabel('Distance (m)')
+plt.xticks(range(0, 5001, 250))
+plt.ylabel('Number of rentals')
+plt.grid()
+plt.show()
+
+# get distances above 50 meters
+distances = distances[distances > 50]
+
 print(f'Median straight-line distance between starting and finishing positions (in meters): {distances.median():.2f}')
 
-distances.plot.hist(bins=100, range=(100, 5000), title='Histogram of straight-line distances between starting and finishing positions', xlabel='Distance (m)', ylabel='Number of rentals')
+print(f'Maximum straight-line distance between starting and finishing positions (in meters): {distances.max():.2f}')
+print(f'Minimum straight-line distance between starting and finishing positions (in meters): {distances.min():.2f}')
+
+# percentiles
+p50 = distances.quantile(0.5)
+p75 = distances.quantile(0.75)
+p90 = distances.quantile(0.9)
+p95 = distances.quantile(0.95)
+p99 = distances.quantile(0.99)
+print(f'50th percentile straight-line distance (m): {p50:.2f}')
+print(f'75th percentile straight-line distance (m): {p75:.2f}')
+print(f'90th percentile straight-line distance (m): {p90:.2f}')
+print(f'95th percentile straight-line distance (m): {p95:.2f}')
+print(f'99th percentile straight-line distance (m): {p99:.2f}')
 
 # %%
 # time per distance
@@ -137,7 +193,10 @@ station_starts = ~df_all['Rental place'].str.startswith('BIKE')
 station_destinations = ~df_all['Return place'].str.startswith('BIKE')
 
 station_rentals = df_all[station_starts & station_destinations]
-popular_routes = station_rentals.groupby(['Rental place', 'Return place']).size().sort_values(ascending=False).head(10)
+popular_routes = station_rentals.groupby(['Rental place', 'Return place']).size().sort_values(ascending=False)
+# filter out entries where start and end stations are the same
+popular_routes = popular_routes[popular_routes.index.get_level_values(0) != popular_routes.index.get_level_values(1)]
+popular_routes = popular_routes.head(10)
 print('Most popular station-to-station routes:')
 print(popular_routes)
 # %%

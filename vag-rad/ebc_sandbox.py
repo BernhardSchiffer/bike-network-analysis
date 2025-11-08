@@ -1,23 +1,30 @@
 #%%
 # imports
-import osmnx as ox
-import igraph as ig
 import time
-from utils.utils import parse_junction_osmid, parse_old_edge_key, get_reversed_key, buffer_in_meters
-from utils.visualization_utils import plot_graph, plot_shifted_graph
-from utils.overpass_utils import fetch_city_polygon
-import shapely
-import pandas as pd
-import geopandas as gpd
-import networkx as nx
 from collections import Counter
+
+import geopandas as gpd
+import igraph as ig
 import matplotlib.colors
 import matplotlib.pyplot as plt
-from tqdm import tqdm
-from utils.population_provider import GHSLPopulationProvider
-from tqdm import tqdm
-import numpy as np
 import momepy as mp
+import networkx as nx
+import numpy as np
+import osmnx as ox
+import pandas as pd
+import shapely
+from tqdm import tqdm
+
+from utils.demand_provider import VagRadDemandProvider
+from utils.overpass_utils import fetch_city_polygon
+from utils.population_provider import GHSLPopulationProvider
+from utils.utils import (
+    buffer_in_meters,
+    get_reversed_key,
+    parse_junction_osmid,
+    parse_old_edge_key,
+)
+from utils.visualization_utils import plot_graph, plot_shifted_graph
 
 #%%
 # load graph from file
@@ -26,9 +33,10 @@ routing_graph = ox.load_graphml('simplified_bicycle_graph.graphml', node_dtypes=
 #%%
 # add population data to nodes
 population_provider = GHSLPopulationProvider()
-for n in routing_graph.nodes:
-    population = population_provider.get_population_at_point(shapely.Point(routing_graph.nodes[n]['x'], routing_graph.nodes[n]['y']))
-    routing_graph.nodes[n]['population'] = population
+for node, data in tqdm(list(routing_graph.nodes(data=True)), desc='adding population counts to nodes', unit='node'):
+    point = shapely.Point(data['x'], data['y'])
+    population = population_provider.get_population_at_point(point)
+    routing_graph.nodes[node]['population'] = population
 
 # %%
 def get_edge_tessellation(graph: nx.MultiDiGraph, area: shapely.Polygon) -> gpd.GeoDataFrame:
@@ -95,33 +103,53 @@ except FileNotFoundError:
     node_weights = get_node_area_weights(routing_graph, nbg_area)
     node_weights.to_pickle(node_area_weights_file)
 
-for node, data in routing_graph.nodes(data=True):
+for node, data in tqdm(list(routing_graph.nodes(data=True)), desc='adding covered area to nodes', unit='node'):
     osmid = data['osmid']
     try:
         area_weight = node_weights[osmid]
         routing_graph.nodes[node]['area_weight'] = area_weight
     except KeyError:
-        routing_graph.nodes[n]['area_weight'] = 0.0
+        routing_graph.nodes[node]['area_weight'] = 0.0
 
+# %%
+# add vag rad demand to nodes
+vag_rad_demand_provider = VagRadDemandProvider()
+
+points: dict[shapely.Point, tuple[float, float]] = {}
+
+for node, data in tqdm(list(routing_graph.nodes(data=True)), desc='adding vag rad demand to nodes', unit='node'):
+    point = shapely.Point(data['x'], data['y'])
+    # check if demand at point was already calculated
+    if (point in points):
+        demand = points[point]
+    else:
+        demand = vag_rad_demand_provider.get_demand_at_point(point)
+        points[point] = demand
+    routing_graph.nodes[node]['vag_rad_demand_starts'] = demand[0]
+    routing_graph.nodes[node]['vag_rad_demand_endings'] = demand[1]
+
+# %%
+target_sum = 0
+start_sum = 0
+for node, data in routing_graph.nodes(data=True):
+    target_sum += data['vag_rad_demand_endings']
+    start_sum += data['vag_rad_demand_starts']
+
+print(f'total vag rad demand endings: {target_sum}')
+print(f'total vag rad demand starts: {start_sum}')
 #%%
+# create igraph from networkx graph for ebc calculation
 wg: ig.Graph = ig.Graph.from_networkx(routing_graph)
 
 #%%
-#polygon = shapely.box(49.464443, 11.160049, 49.467148, 11.167560)
-
-def is_intersection_node(node) -> bool:
-    return node['_nx_name'] != node['osmid']
-
+# get start and target nodes for ebc calculation
 def is_intersection_edge(edge) -> bool:
     return edge['turning_angle'] is not None
 
-def is_within_polygon(node, polygon: shapely.Polygon) -> bool:
-    point = shapely.Point(node['y'], node['x'])
-    return point.within(polygon)
-
-# get intersection nodes whom osmid is not already in the list
 start_nodes = set()
 target_nodes = set()
+
+# get nodes that are at the end of dead ends
 for node in wg.vs:
     in_degree = node.indegree()
     out_degree = node.outdegree()
@@ -130,6 +158,7 @@ for node in wg.vs:
     if out_degree == 0:
         target_nodes.add(node)
 
+# get intersection nodes
 for edge in wg.es:
     if is_intersection_edge(edge):
         source_node = wg.vs[edge.source]
@@ -142,8 +171,7 @@ print(f'total number of nodes: {len(wg.vs)}')
 print(f'found {len(start_nodes)} start nodes')
 print(f'found {len(target_nodes)} target nodes')
 
-#assert len(start_nodes) + len(target_nodes) == len(wg.vs), f"sum of start and target nodes ({len(start_nodes) + len(target_nodes)}) does not equal total number of nodes ({len(wg.vs)})"
-
+# plot start and target nodes
 def get_shifted_point(node):
     y = node['y_reversed']
     x = node['x_reversed']
@@ -157,13 +185,48 @@ def get_shifted_point(node):
     
     return shapely.Point(node['x'], node['y'])
 
-gpd.GeoDataFrame({'osmid': [node['osmid'] for node in start_nodes], 'node_id': [node.index for node in start_nodes], 'geometry': [get_shifted_point(node) for node in start_nodes]}, geometry='geometry', crs='EPSG:4326').to_file('ebc.gpkg', layer='start_nodes', driver='GPKG')
+#gpd.GeoDataFrame({'osmid': [node['osmid'] for node in start_nodes], 'node_id': [node.index for node in start_nodes], 'geometry': [get_shifted_point(node) for node in start_nodes]}, geometry='geometry', crs='EPSG:4326').to_file('ebc.gpkg', layer='start_nodes', driver='GPKG')
 
-gpd.GeoDataFrame({'osmid': [node['osmid'] for node in target_nodes], 'node_id': [node.index for node in target_nodes], 'geometry': [get_shifted_point(node) for node in target_nodes]}, geometry='geometry', crs='EPSG:4326').to_file('ebc.gpkg', layer='target_nodes', driver='GPKG')
+#gpd.GeoDataFrame({'osmid': [node['osmid'] for node in target_nodes], 'node_id': [node.index for node in target_nodes], 'geometry': [get_shifted_point(node) for node in target_nodes]}, geometry='geometry', crs='EPSG:4326').to_file('ebc.gpkg', layer='target_nodes', driver='GPKG')
 
 # %%
+target_nodes = list(target_nodes)
+start_nodes = list(start_nodes)
 start = time.time()
-ebc = wg.edge_betweenness_weighted(directed=True, distances="weight", edge_weights="weight", sources=start_nodes, targets=target_nodes, node_weights="population", lower_limit=0, upper_limit=4500, normalized=False)
+
+# create enum for weight_function
+from enum import Enum
+
+
+class weight_function(Enum):
+    SPACIAL_NORMALIZATION = 'spacial_normalization'
+    POPULATION_DISTANCE_DECAY = 'population_distance_decay'
+    WEIGHT_MULTIPLICATION = 'weight_multiplication'
+
+class weight_combinator(Enum):
+    MULTIPLY = 'multiply'
+    ADD = 'add'
+
+class node_weight:
+    def __init__(self, weight_function: weight_function, source_weights: str, target_weights: str, combinator: weight_combinator):
+        self.weight_function = weight_function
+        self.source_weights = source_weights
+        self.target_weights = target_weights
+        self.combinator = combinator
+
+    def to_dict(self) -> dict:
+        return {
+            'weight_function': self.weight_function.value,
+            'source_weights': self.source_weights,
+            'target_weights': self.target_weights,
+            'combinator': self.combinator.value
+        }
+
+area_normalization = node_weight(weight_function.SPACIAL_NORMALIZATION, 'area_weight', 'area_weight', weight_combinator.MULTIPLY).to_dict()
+
+population_weights = node_weight(weight_function.POPULATION_DISTANCE_DECAY, 'population', 'population', weight_combinator.MULTIPLY).to_dict()
+
+ebc = wg.edge_betweenness_weighted(directed=True, distances="length", edge_weights="weight", sources=start_nodes, targets=target_nodes, node_weights=[population_weights], lower_limit=1000, upper_limit=4500, normalized=False)
 end = time.time()
 print(f'calculated edge betweenness centrality in {end - start} seconds')
 norm_ebc = np.divide(ebc, max(ebc))
@@ -263,27 +326,13 @@ def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], e
     return edges_df#.reset_index(drop=True)
 
 # %%
-plot_edge_betweenness_centrality(routing_graph, ebc, expanded=True).to_file('ebc.gpkg', layer='ebc_0_4500_weight_population', driver='GPKG')
+plot_edge_betweenness_centrality(routing_graph, ebc, expanded=True).to_file('ebc.gpkg', layer='ebc_area_population_decay', driver='GPKG')
 
 # %%
-area_weight = [routing_graph.nodes[n]['area_weight'] for n in routing_graph.nodes]
-print(f'max node weight: {max(area_weight)}')
-print(f'min node weight: {min(area_weight)}')
-print(f'total node weight: {sum(area_weight)}')
-# %%
-area_weight_norm = {}
-total = sum(area_weight)
-for idx1, p1 in tqdm(enumerate(area_weight[:1000]), desc='normalize node weight', unit='node'):
-    tmp = []
-    for idx2, p2 in enumerate(area_weight):
-        if idx1 == idx2:
-            tmp.append(0)
-        tmp.append(p1 * (p2 / (total - p1)))
-    area_weight_norm[idx1] = tmp
-#%%
-for idx in area_weight_norm:
-    print(max(area_weight_norm[idx]))
-    print(min(area_weight_norm[idx]))
-    print('---------')
 
+# save ebc to pickle file
+import pickle
+
+with open('ebc_area_weight_population.pkl', 'wb') as f:
+    pickle.dump(ebc, f)
 # %%

@@ -6,6 +6,7 @@ import geopandas as gpd
 import overpy
 from tqdm import tqdm
 from utils.overpass_utils import get_polygon_from_result, fetch_city_polygon
+from utils.demand_provider import DemandProvider
 
 class PopulationProvider(ABC):
     @abstractmethod
@@ -16,7 +17,7 @@ class PopulationProvider(ABC):
     def get_population_at_point(self, point: shapely.Point) -> float:
         pass
 
-class GHSLPopulationProvider(PopulationProvider):
+class GHSLPopulationProvider(PopulationProvider, DemandProvider):
     def __init__(self):
         self.population_src: rasterio.DatasetReader = rasterio.open('population_data/GHS_POP_E2025_GLOBE_R2023A_4326_3ss_V1_0_R4_C20.tif')
         # read all the data from the first band
@@ -51,6 +52,10 @@ class GHSLPopulationProvider(PopulationProvider):
     def get_population_at_point(self, point: shapely.Point) -> float:
         row, col = self.population_src.index(point.x, point.y)
         return self.population_data[row, col]
+    
+    def get_demand_at_point(self, point: shapely.Point) -> float:
+        # for GHSL, we assume demand is proportional to the population
+        return self.get_population_at_point(point)
 
 class NurenbergDistrictPopulationProvider(PopulationProvider):
     def __init__(self, from_cache: bool = True):

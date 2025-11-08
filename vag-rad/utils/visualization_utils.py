@@ -8,7 +8,7 @@ from tqdm import tqdm
 from geopandas import GeoDataFrame
 from pandas import DataFrame
 
-def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[DataFrame, DataFrame | None]:
+def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame, GeoDataFrame | None]:
     debug_marker_df = None
 
     if debug_marker:
@@ -39,7 +39,7 @@ def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[Data
         debug_marker_df = GeoDataFrame(debug_marker_df, crs='EPSG:4326')
     
     # plot edges
-    edges_df = {'u': [], 'v': [], 'key': [], 'osmid': [], 'geometry': [], 'color': [], 'line_width': [], 'tooltip': []}
+    edges_data = {'u': [], 'v': [], 'key': [], 'osmid': [], 'geometry': [], 'color': [], 'line_width': [], 'tooltip': []}
 
     for s, d, key, data in tqdm(graph.edges(data=True, keys=True), desc='Plotting edges', unit='edges'):
 
@@ -58,14 +58,14 @@ def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[Data
 
         color = data['color'] if 'color' in data else color
 
-        edges_df['u'].append(s)
-        edges_df['v'].append(d)
-        edges_df['key'].append(key)
-        edges_df['osmid'].append(data.get('osmid', None))
-        edges_df['geometry'].append(data['shifted_geometry'])
-        edges_df['color'].append(matplotlib.colors.to_hex(color))
-        edges_df['line_width'].append(0.1)
-        edges_df['tooltip'].append(f'''<div style="color:white">
+        edges_data['u'].append(s)
+        edges_data['v'].append(d)
+        edges_data['key'].append(key)
+        edges_data['osmid'].append(data.get('osmid', None))
+        edges_data['geometry'].append(data['shifted_geometry'])
+        edges_data['color'].append(matplotlib.colors.to_hex(color))
+        edges_data['line_width'].append(0.1)
+        edges_data['tooltip'].append(f'''<div style="color:white">
                                         osmid: {data.get('osmid', None)}<br>
                                         edge: {s} -> {d}<br>
                                         reversed: {reversed}<br>
@@ -77,11 +77,12 @@ def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[Data
                                         applied filters: {data.get('applied_filters', None)}<br>
                                     </div>''')
     
-    edges_df = GeoDataFrame(edges_df, crs='EPSG:4326').set_index(['u', 'v', 'key'])
+    edges_df = GeoDataFrame(edges_data, crs='EPSG:4326')
+    edges_df.set_index(['u', 'v', 'key'], inplace=True)
 
     return edges_df, debug_marker_df
 
-def plot_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[DataFrame, DataFrame | None]:
+def plot_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame, GeoDataFrame | None]:
     debug_marker_df = None
 
     if debug_marker:
@@ -97,24 +98,25 @@ def plot_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[DataFrame, D
         debug_marker_df = GeoDataFrame(debug_marker_df, crs='EPSG:4326')
     
     # plot edges
-    edges_df = {'u': [], 'v': [], 'key': [], 'geometry': [], 'color': [], 'line_width': [], 'tooltip': []}
+    edges_data = {'u': [], 'v': [], 'key': [], 'geometry': [], 'color': [], 'line_width': [], 'tooltip': []}
 
     for s, d, key, data in tqdm(graph.edges(data=True, keys=True), desc='Plotting edges', unit='edges'):
 
         color = data['color'] if 'color' in data else 'black'
 
-        edges_df['u'].append(s)
-        edges_df['v'].append(d)
-        edges_df['key'].append(key)
-        edges_df['geometry'].append(data.get('geometry', None))
-        edges_df['color'].append(matplotlib.colors.to_hex(color))
-        edges_df['line_width'].append(0.1)
-        edges_df['tooltip'].append(f'''<div style="color:white">
+        edges_data['u'].append(s)
+        edges_data['v'].append(d)
+        edges_data['key'].append(key)
+        edges_data['geometry'].append(data.get('geometry', None))
+        edges_data['color'].append(matplotlib.colors.to_hex(color))
+        edges_data['line_width'].append(0.1)
+        edges_data['tooltip'].append(f'''<div style="color:white">
                                         osmid: {data.get('osmid', None)}<br>
                                         edge: {s} -> {d}<br>
                                     </div>''')
     
-    edges_df = GeoDataFrame(edges_df, crs='EPSG:4326').set_index(['u', 'v', 'key'])
+    edges_df = GeoDataFrame(edges_data, crs='EPSG:4326')
+    edges_df.set_index(['u', 'v', 'key'], inplace=True)
 
     return edges_df, debug_marker_df
 

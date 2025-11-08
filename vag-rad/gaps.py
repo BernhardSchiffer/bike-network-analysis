@@ -712,9 +712,6 @@ print(f'gap1: {gap1['gap']}')
 print(f'gap2: {gap2['gap']}')
 
 # %%
-import editdistance
-editdistance.eval(gap1['gap'], gap2['gap'])
-# %%
 def jaccard_index(list1: list[int], list2: list[int]) -> float:
     set1 = set(list1)
     set2 = set(list2)
