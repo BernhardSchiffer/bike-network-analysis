@@ -135,15 +135,14 @@ def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
         out_edges = list(graph.out_edges(node, data=True))
         edges = in_edges + out_edges
 
-        reversed_coords = []
-        not_reversed_coords = []
+        shifted_points = []
         street_edges = []
 
         for edge in edges:
             s, d, data = edge
             # edge is an edge that represents a turning option at an intersection
             # the nodes of this edge are the same as the intersection node
-            if graph.nodes[s]['x'] == graph.nodes[d]['x'] and graph.nodes[s]['y'] == graph.nodes[d]['y']:
+            if 'turning_angle' in data.keys():
                 continue
             else:
                 # edge represents a street
@@ -154,6 +153,14 @@ def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
             except KeyError:
                 line = shapely.LineString([[graph.nodes[s]['x'], graph.nodes[s]['y']], [graph.nodes[d]['x'], graph.nodes[d]['y']]])
             
+            line_coords = list(line.coords)
+            if line_coords[0] == line_coords[-1]:
+                # line is closed
+                # move last and first point slightly
+                first_point = line.interpolate(0.00001)
+                last_point = line.interpolate(line.length - 0.00001)
+                line = shapely.LineString([first_point] + list(line.coords[1:-1]) + [last_point])
+
             shifted_line = line.parallel_offset(0.00001, side='right', join_style='mitre')
             if shifted_line.is_empty:
                 shifted_line = line
@@ -167,18 +174,12 @@ def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
                 print(s, d, data)
                 print('IndexError:', shifted_line)
             
-            if data['reversed']:
-                reversed_coords.append((shifted_coords[0], shifted_coords[-1]))
-            else:
-                not_reversed_coords.append((shifted_coords[0], shifted_coords[-1]))
+            shifted_points.append((shifted_coords[0], shifted_coords[-1]))
 
-        x_reversed = np.mean([coord[0] for coord in reversed_coords])
-        y_reversed = np.mean([coord[-1] for coord in reversed_coords])
+        x_shifted = np.mean([coord[0] for coord in shifted_points])
+        y_shifted = np.mean([coord[-1] for coord in shifted_points])
 
-        x_not_reversed = np.mean([coord[0] for coord in not_reversed_coords])
-        y_not_reversed = np.mean([coord[-1] for coord in not_reversed_coords])
-
-        if (len(not_reversed_coords) == 1 or len(reversed_coords) == 1) and len(street_edges) == 1:
+        if len(shifted_points) == 1 and len(street_edges) == 1:
             s, d, data = street_edges[0]
             try:
                 line: shapely.LineString = data['geometry']
@@ -186,6 +187,14 @@ def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
                 s_x, s_y = (graph.nodes[s]['x'], graph.nodes[s]['y'])
                 d_x, d_y = (graph.nodes[d]['x'], graph.nodes[d]['y'])
                 line = shapely.LineString([[s_x, s_y], [d_x, d_y]])
+
+            line_coords = list(line.coords)
+            if line_coords[0] == line_coords[-1]:
+                # line is closed
+                # move last and first point slightly
+                first_point = line.interpolate(0.00001)
+                last_point = line.interpolate(line.length - 0.00001)
+                line = shapely.LineString([first_point] + list(line.coords[1:-1]) + [last_point])
             shifted_line = line.parallel_offset(0.00001, side='right', join_style='mitre')
             if shifted_line.is_empty:
                 shifted_line = line
@@ -195,74 +204,49 @@ def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
             else:
                 shifted_point = shifted_line.line_interpolate_point(-(shifted_line.length - 0.00002))
             
-            if len(not_reversed_coords) == 1:
-                x_not_reversed = shifted_point.x
-                y_not_reversed = shifted_point.y
-            else:
-                x_reversed = shifted_point.x
-                y_reversed = shifted_point.y
+            x_shifted = shifted_point.x
+            y_shifted = shifted_point.y
 
-        if len(reversed_coords) > 0:
-            #x_reversed, y_reversed = gk_to_osm.transform(x_reversed, y_reversed)
-            graph.nodes[node]['x_reversed'] = x_reversed
-            graph.nodes[node]['y_reversed'] = y_reversed
-        if len(not_reversed_coords) > 0:
-            #x_not_reversed, y_not_reversed = gk_to_osm.transform(x_not_reversed, y_not_reversed)
-            graph.nodes[node]['x_not_reversed'] = x_not_reversed
-            graph.nodes[node]['y_not_reversed'] = y_not_reversed
+        graph.nodes[node]['x_shifted'] = x_shifted
+        graph.nodes[node]['y_shifted'] = y_shifted
 
     for s, d, key, data in graph.edges(data=True, keys=True):
         try:
             line: shapely.LineString = data['geometry']
+            line_coords = list(line.coords)
+            if line_coords[0] == line_coords[-1]:
+                # line is closed
+                # move last and first point slightly
+                first_point = line.interpolate(0.00001)
+                last_point = line.interpolate(line.length - 0.00001)
+                line = shapely.LineString([first_point] + list(line.coords[1:-1]) + [last_point])
             line = line.parallel_offset(0.00001, side='right', join_style='mitre')
             if line.is_empty:
                 line = data['geometry']
 
-            if data['reversed']:
-                line = list(line.coords)
-                try:
-                    line[0] = (graph.nodes[s]['x_reversed'], graph.nodes[s]['y_reversed'])
-                    line[-1] = (graph.nodes[d]['x_reversed'], graph.nodes[d]['y_reversed'])
-                except KeyError:
-                    line[0] = (graph.nodes[s]['x'], graph.nodes[s]['y'])
-                    line[-1] = (graph.nodes[d]['x'], graph.nodes[d]['y'])
-            else:
-                line = list(line.coords)
-                try:
-                    line[0] = (graph.nodes[s]['x_not_reversed'], graph.nodes[s]['y_not_reversed'])
-                    line[-1] = (graph.nodes[d]['x_not_reversed'], graph.nodes[d]['y_not_reversed'])
-                except KeyError:
-                    line[0] = (graph.nodes[s]['x'], graph.nodes[s]['y'])
-                    line[-1] = (graph.nodes[d]['x'], graph.nodes[d]['y'])
+            line = list(line.coords)
+            try:
+                line[0] = (graph.nodes[s]['x_shifted'], graph.nodes[s]['y_shifted'])
+                line[-1] = (graph.nodes[d]['x_shifted'], graph.nodes[d]['y_shifted'])
+            except KeyError:
+                line[0] = (graph.nodes[s]['x'], graph.nodes[s]['y'])
+                line[-1] = (graph.nodes[d]['x'], graph.nodes[d]['y'])
             line = shapely.LineString(line)
         except KeyError:
             try:
-                reversed = data['reversed']
+                start = [graph.nodes[s]['y_shifted'], graph.nodes[s]['x_shifted']]
             except:
-                reversed = None
-
-            if reversed == True:
-                start = [graph.nodes[s]['y_reversed'], graph.nodes[s]['x_reversed']]
-                dest = [graph.nodes[d]['y_reversed'], graph.nodes[d]['x_reversed']]
-            if reversed == False:
-                start = [graph.nodes[s]['y_not_reversed'], graph.nodes[s]['x_not_reversed']]
-                dest = [graph.nodes[d]['y_not_reversed'], graph.nodes[d]['x_not_reversed']]
-            # nodes at intersections only have one of those attributes (*_reversed, *_not_reversed) because they are only traversed in one direction
-            if reversed is None:
                 try:
-                    start = [graph.nodes[s]['y_reversed'], graph.nodes[s]['x_reversed']]
+                    start = [graph.nodes[s]['y_shifted'], graph.nodes[s]['x_shifted']]
                 except:
-                    try:
-                        start = [graph.nodes[s]['y_not_reversed'], graph.nodes[s]['x_not_reversed']]
-                    except:
-                        start = [graph.nodes[s]['y'], graph.nodes[s]['x']]
+                    start = [graph.nodes[s]['y'], graph.nodes[s]['x']]
+            try:
+                dest = [graph.nodes[d]['y_shifted'], graph.nodes[d]['x_shifted']]
+            except:
                 try:
-                    dest = [graph.nodes[d]['y_reversed'], graph.nodes[d]['x_reversed']]
+                    dest = [graph.nodes[d]['y_shifted'], graph.nodes[d]['x_shifted']]
                 except:
-                    try:
-                        dest = [graph.nodes[d]['y_not_reversed'], graph.nodes[d]['x_not_reversed']]
-                    except:
-                        dest = [graph.nodes[d]['y'], graph.nodes[d]['x']]
+                    dest = [graph.nodes[d]['y'], graph.nodes[d]['x']]
             line = shapely.LineString([start[::-1], dest[::-1]])
             pass
         

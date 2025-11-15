@@ -190,7 +190,7 @@ for edge in graph.edges(data=True, keys=True):
         graph.edges[u, v, key]['shifted_geometry'] = line
     else:
         line: shapely.LineString = data['geometry']
-        shifted_line = line.parallel_offset(line_offset, 'right', join_style=2)
+        shifted_line = line.parallel_offset(line_offset, side='right', join_style='mitre')
         line_coords_start = shapely.Point(graph.nodes[u]['x_shifted'], graph.nodes[u]['y_shifted'])
         line_coords_dest = shapely.Point(graph.nodes[v]['x_shifted'], graph.nodes[v]['y_shifted'])
 

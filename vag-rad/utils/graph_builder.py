@@ -122,7 +122,7 @@ def split_nodes(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
 
                 turning_angle = get_angle_between_edges(e1['geometry'], e2['geometry'])
                 penalty = get_turn_penalty(turning_angle)
-                weight = 0.6*1000*(penalty - 1.0)
+                weight = penalty
                 graph.add_edge((in_edge_start, in_edge_dest, in_edge_key), out_node, length=0.0, weight=weight, penalty=penalty, turning_angle=turning_angle, osmid=(in_edge_data['osmid'], out_edge_data['osmid']))
             # add edge from previous node to new in node
             graph.add_edges_from([(in_edge_start, (in_edge_start, in_edge_dest, in_edge_key), in_edge_data)])
@@ -600,8 +600,9 @@ class GraphBuilder:
         applied_filters: dict[tuple[int, int, int], dict[str, list[str]]] = {}
         problematic_osmids = []
         for u, v, key, data in tqdm(graph.edges(data=True, keys=True), desc='calculating edge weights', total=len(graph.edges), unit='edges'):
-            if 'turning_angle' in data.keys() and u.out_degree() == 1 and v.in_degree() == 1:
-                weights[u,v,key] = {'weight': get_turn_penalty(data['turning_angle'])}
+            if type(data['osmid']) is tuple:
+                # skip edges that are created during node splitting
+                # can be used to penalize node attributes later
                 continue
             try:
                 penalty = self.get_weight(u, v, data)

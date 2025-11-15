@@ -1,13 +1,19 @@
 # %% 
 # imports
-import osmnx as ox
 import networkx as nx
-from utils.graph_builder import GraphBuilder, split_nodes
-from utils.utils import shift_graph, buffer_in_meters
-from utils.visualization_utils import plot_shifted_graph
-from tqdm import tqdm
+import osmnx as ox
 import shapely
+from tqdm import tqdm
+
+from utils.graph_builder import (
+    GraphBuilder,
+    route_choice_model_1,
+    route_choice_model_2,
+    split_nodes,
+)
 from utils.overpass_utils import fetch_city_polygon
+from utils.utils import buffer_in_meters, shift_graph
+from utils.visualization_utils import plot_shifted_graph
 
 # %%
 # fetch graph of all streets available by bike
@@ -17,6 +23,10 @@ nbg_area = fetch_city_polygon(place_name)
 
 # create bbox with 4km buffer around nuremberg area
 query_polygon = buffer_in_meters(nbg_area, 4000)
+
+# get poygon of boundingbox
+#bbox = 10.963379,49.559561,10.964554,49.560205
+#query_polygon = shapely.box(*bbox)
 
 # use specific overpass settings
 ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-21T20:21:22Z"]{maxsize}'
@@ -41,15 +51,18 @@ service_ways = '["highway"~"service"]["access"="no"]'
 bus_only_ways = '["highway"~"service"]["bus"="yes"]'
 trams_only_ways = '["highway"~"service"]["railway"="yes"]'
 
-not_bikeable_graph = ox.graph_from_polygon(polygon=query_polygon, simplify=False, retain_all=True, custom_filter=[not_bikeable_ways, service_ways, bus_only_ways, trams_only_ways])
-print('number of edges in not bikeable graph:', len(not_bikeable_graph.edges))
+try:
+    not_bikeable_graph = ox.graph_from_polygon(polygon=query_polygon, simplify=False, retain_all=True, custom_filter=[not_bikeable_ways, service_ways, bus_only_ways, trams_only_ways])
+    print('number of edges in not bikeable graph:', len(not_bikeable_graph.edges))
 
-for e in tqdm(not_bikeable_graph.edges, desc='remove not bikeable edges', total=len(not_bikeable_graph.edges), unit='edges'):
-    # remove edges that are not bikeable
-    if graph.has_edge(*e):
-        graph.remove_edge(*e)
+    for e in tqdm(not_bikeable_graph.edges, desc='remove not bikeable edges', total=len(not_bikeable_graph.edges), unit='edges'):
+        # remove edges that are not bikeable
+        if graph.has_edge(*e):
+            graph.remove_edge(*e)
 
-print('number of edges in bikeable graph after removing not bikeable edges:', len(graph.edges))
+    print('number of edges in bikeable graph after removing not bikeable edges:', len(graph.edges))
+except Exception as e:
+    pass
 
 graph = ox.simplify_graph(graph, remove_rings=False, edge_attrs_differ=['osmid'])
 
@@ -62,7 +75,7 @@ for u, v, key, data in graph.edges(data=True, keys=True):
 print('number of edges in bikeable graph after simplifying:', len(graph.edges))
 
 # set node and edge attributes
-graph_builder = GraphBuilder(query_polygon)
+graph_builder = GraphBuilder(query_polygon, route_choice_model_1)
 
 # add paths where the street is oneway but bikes are allowed in both directions
 edge_count_before = len(graph.edges)
@@ -83,7 +96,7 @@ print('number of nodes:', len(graph.nodes))
 graph = split_nodes(graph)
 # enforces turning restrictions
 # these restrictions exist mainly for cars, and have not much of an effect on the routing behavior for bikes
-graph = graph_builder.enforce_restrictions(graph)
+#graph = graph_builder.enforce_restrictions(graph)
 graph = shift_graph(graph)
 
 print('stats of graph after splitting crossing nodes:')
@@ -96,13 +109,13 @@ graph = graph_builder.set_edge_weights(graph)
 graph.remove_nodes_from(list(nx.isolates(graph)))
 
 # save graph to file
-ox.save_graphml(nx.MultiDiGraph(graph), filepath='simplified_bicycle_graph.graphml')
+#ox.save_graphml(nx.MultiDiGraph(graph), filepath='simplified_bicycle_graph.graphml')
 
 # %%
 # plot edges and nodes for debugging purposes
 edges_df, nodes_df = plot_shifted_graph(graph, debug_marker=True)
-edges_df.to_file(filename='graph.gpkg', layer='shifted_routing_graph', driver='GPKG')
-nodes_df.to_file(filename='graph.gpkg', layer='routing_graph_nodes', driver='GPKG')
+edges_df.to_file(filename='debug_graph.gpkg', layer='shifted_routing_graph', driver='GPKG')
+nodes_df.to_file(filename='debug_graph.gpkg', layer='routing_graph_nodes', driver='GPKG')
 
 #plot_graph(graph).to_file(filename='graph.gpkg', layer='routing_graph', driver='GPKG')
 
@@ -164,7 +177,7 @@ for u, v, key, data in graph.edges(data=True, keys=True):
 print('number of edges in bikeable graph after simplifying:', len(graph.edges))
 
 # set node and edge attributes
-graph_builder = GraphBuilder(query_polygon)
+graph_builder = GraphBuilder(query_polygon, route_choice_model_1)
 
 # add paths where the street is oneway but bikes are allowed in both directions
 edge_count_before = len(graph.edges)
@@ -181,4 +194,22 @@ graph.remove_nodes_from(list(nx.isolates(graph)))
 # save graph to file
 ox.save_graphml(nx.MultiDiGraph(graph), filepath='bicycle_graph.graphml')
 
+# %%
+line = graph.edges[(27550623, 27550623, 0), ((27550623, 27550623, 0), 27550623, 0), 0]['geometry']
+
+print(line)
+display(line)
+
+line_coords = list(line.coords)
+
+if line_coords[0] == line_coords[-1]:
+    print('line is closed')
+    # move last and first point slightly
+    first_point = line.interpolate(0.00001)
+    last_point = line.interpolate(line.length - 0.00001)
+    line = shapely.LineString([first_point] + list(line.coords[1:-1]) + [last_point])
+    print(line)
+
+shifted_line = line.parallel_offset(0.00001, side='right', join_style='mitre')
+display(shifted_line)
 # %%

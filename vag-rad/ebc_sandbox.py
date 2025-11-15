@@ -173,13 +173,8 @@ print(f'found {len(target_nodes)} target nodes')
 
 # plot start and target nodes
 def get_shifted_point(node):
-    y = node['y_reversed']
-    x = node['x_reversed']
-    if y is not None and x is not None:
-        return shapely.Point(x, y)
-    
-    y = node['y_not_reversed']
-    x = node['x_not_reversed']
+    y = node['y_shifted']
+    x = node['x_shifted']
     if y is not None and x is not None:
         return shapely.Point(x, y)
     
