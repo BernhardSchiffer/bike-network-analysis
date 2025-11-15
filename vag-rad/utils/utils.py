@@ -1,20 +1,23 @@
-import networkx as nx
-import osmnx as ox
-from folium import PolyLine
-import geopandas as gpd
-from geopandas import GeoDataFrame
-import tarfile
 import datetime
-import os
 import multiprocessing as mp
-from utils.graph_types import *
-import leafmap.foliumap as leafmap
+import os
+import tarfile
 import typing
-import shapely
-from shapely.ops import transform
-from pyproj import Geod, Transformer, CRS
-from tqdm import tqdm
+
+import geopandas as gpd
+import leafmap.foliumap as leafmap
+import networkx as nx
 import numpy as np
+import osmnx as ox
+import shapely
+from folium import PolyLine
+from geopandas import GeoDataFrame
+from pyproj import CRS, Geod, Transformer
+from shapely.ops import transform
+from tqdm import tqdm
+
+from utils.graph_types import *
+
 
 # calculate length of edges of a graph
 def get_path_length(graph: nx.MultiGraph | nx.MultiDiGraph) -> float:
