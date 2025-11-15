@@ -200,7 +200,8 @@ from enum import Enum
 
 class weight_function(Enum):
     SPACIAL_NORMALIZATION = 'spacial_normalization'
-    POPULATION_DISTANCE_DECAY = 'population_distance_decay'
+    GRAVITY_MODEL = 'gravity_model'
+    EXPONENTIAL_GRAVITY_MODEL = 'exponential_gravity_model'
     WEIGHT_MULTIPLICATION = 'weight_multiplication'
 
 class weight_combinator(Enum):
@@ -208,23 +209,25 @@ class weight_combinator(Enum):
     ADD = 'add'
 
 class node_weight:
-    def __init__(self, weight_function: weight_function, source_weights: str, target_weights: str, combinator: weight_combinator):
+    def __init__(self, weight_function: weight_function, source_weights: str, target_weights: str, combinator: weight_combinator = weight_combinator.MULTIPLY, factor: float = 1.0):
         self.weight_function = weight_function
         self.source_weights = source_weights
         self.target_weights = target_weights
         self.combinator = combinator
+        self.factor = factor
 
     def to_dict(self) -> dict:
         return {
             'weight_function': self.weight_function.value,
             'source_weights': self.source_weights,
             'target_weights': self.target_weights,
-            'combinator': self.combinator.value
+            'combinator': self.combinator.value,
+            'factor': self.factor
         }
 
 area_normalization = node_weight(weight_function.SPACIAL_NORMALIZATION, 'area_weight', 'area_weight', weight_combinator.MULTIPLY).to_dict()
 
-population_weights = node_weight(weight_function.POPULATION_DISTANCE_DECAY, 'population', 'population', weight_combinator.MULTIPLY).to_dict()
+population_weights = node_weight(weight_function.EXPONENTIAL_GRAVITY_MODEL, 'population', 'population', weight_combinator.MULTIPLY).to_dict()
 
 ebc = wg.edge_betweenness_weighted(directed=True, distances="length", edge_weights="weight", sources=start_nodes, targets=target_nodes, node_weights=[population_weights], lower_limit=1000, upper_limit=4500, normalized=False)
 end = time.time()
