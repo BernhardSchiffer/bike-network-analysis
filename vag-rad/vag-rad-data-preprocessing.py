@@ -1,12 +1,14 @@
 # %%
 # imports
-import pandas as pd
+import time
+
 import geopandas as gpd
-import shapely.geometry
 import numpy as np
+import pandas as pd
+import shapely.geometry
+
 from utils.overpass_utils import fetch_city_polygon
 from utils.vag_rad_utils import get_vag_rad_flexzone, vag_rad_city_ids
-import time
 
 # %%
 # Ausleihen 2019 und 2020
@@ -249,4 +251,20 @@ print('---')
 
 # saving pre-calculated columns to csv
 df.to_csv('vag-rad-data/processed/All_Ausleihen_Kundendetails.csv', index=False)
+# %%
+flexzone_nbg = get_vag_rad_flexzone(vag_rad_city_ids['Nürnberg'])
+
+flexzone_fuerth = get_vag_rad_flexzone(vag_rad_city_ids['Fürth'])
+
+flexzone_erlangen = get_vag_rad_flexzone(vag_rad_city_ids['Erlangen'])
+
+flexzone_schwabach = get_vag_rad_flexzone(vag_rad_city_ids['Schwabach'])
+
+gpd.GeoDataFrame({'geometry': [flexzone_nbg]}, crs='EPSG:4326').to_file('vag-rad-rentals.gpkg', driver='GPKG', layer='nbg_flexzone')
+
+gpd.GeoDataFrame({'geometry': [flexzone_fuerth]}, crs='EPSG:4326').to_file('vag-rad-rentals.gpkg', driver='GPKG', layer='fuerth_flexzone')
+
+gpd.GeoDataFrame({'geometry': [flexzone_erlangen]}, crs='EPSG:4326').to_file('vag-rad-rentals.gpkg', driver='GPKG', layer='erlangen_flexzone')
+
+gpd.GeoDataFrame({'geometry': [flexzone_schwabach]}, crs='EPSG:4326').to_file('vag-rad-rentals.gpkg', driver='GPKG', layer='schwabach_flexzone')
 # %%
