@@ -10,6 +10,7 @@ import networkx as nx
 import numpy as np
 import osmnx as ox
 import shapely
+import shapely.ops
 from folium import PolyLine
 from geopandas import GeoDataFrame
 from pyproj import CRS, Geod, Transformer
@@ -157,9 +158,7 @@ def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
             if line_coords[0] == line_coords[-1]:
                 # line is closed
                 # move last and first point slightly
-                first_point = line.interpolate(0.00001)
-                last_point = line.interpolate(line.length - 0.00001)
-                line = shapely.LineString([first_point] + list(line.coords[1:-1]) + [last_point])
+                line = shapely.ops.substring(line, 0.000001, line.length)
 
             shifted_line = line.parallel_offset(0.00001, side='right', join_style='mitre')
             if shifted_line.is_empty:
@@ -192,9 +191,7 @@ def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
             if line_coords[0] == line_coords[-1]:
                 # line is closed
                 # move last and first point slightly
-                first_point = line.interpolate(0.00001)
-                last_point = line.interpolate(line.length - 0.00001)
-                line = shapely.LineString([first_point] + list(line.coords[1:-1]) + [last_point])
+                line = shapely.ops.substring(line, 0.000001, line.length)
             shifted_line = line.parallel_offset(0.00001, side='right', join_style='mitre')
             if shifted_line.is_empty:
                 shifted_line = line
@@ -216,10 +213,7 @@ def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
             line_coords = list(line.coords)
             if line_coords[0] == line_coords[-1]:
                 # line is closed
-                # move last and first point slightly
-                first_point = line.interpolate(0.00001)
-                last_point = line.interpolate(line.length - 0.00001)
-                line = shapely.LineString([first_point] + list(line.coords[1:-1]) + [last_point])
+                line = shapely.ops.substring(line, 0.000001, line.length)
             line = line.parallel_offset(0.00001, side='right', join_style='mitre')
             if line.is_empty:
                 line = data['geometry']

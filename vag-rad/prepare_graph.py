@@ -195,21 +195,3 @@ graph.remove_nodes_from(list(nx.isolates(graph)))
 ox.save_graphml(nx.MultiDiGraph(graph), filepath='bicycle_graph.graphml')
 
 # %%
-line = graph.edges[(27550623, 27550623, 0), ((27550623, 27550623, 0), 27550623, 0), 0]['geometry']
-
-print(line)
-display(line)
-
-line_coords = list(line.coords)
-
-if line_coords[0] == line_coords[-1]:
-    print('line is closed')
-    # move last and first point slightly
-    first_point = line.interpolate(0.00001)
-    last_point = line.interpolate(line.length - 0.00001)
-    line = shapely.LineString([first_point] + list(line.coords[1:-1]) + [last_point])
-    print(line)
-
-shifted_line = line.parallel_offset(0.00001, side='right', join_style='mitre')
-display(shifted_line)
-# %%
