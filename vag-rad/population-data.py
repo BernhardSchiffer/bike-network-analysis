@@ -1,8 +1,12 @@
 # %%
 # imports
-from utils.population_provider import GHSLPopulationProvider, NurenbergDistrictPopulationProvider
-from IPython.display import display
 import pandas as pd
+from IPython.display import display
+
+from utils.population_provider import (
+    GHSLPopulationProvider,
+    NurenbergDistrictPopulationProvider,
+)
 
 # %%
 # initialize population providers
@@ -46,7 +50,7 @@ assert districts['ghsl_district_proportion'].sum().round() == 100.0
 assert districts['nbg_district_proportion'].sum() == 100.0
 
 with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-    display(districts)
+    display(districts.sort_values(by='official_population', ascending=False))
 
 # %%
 # show median proportional difference

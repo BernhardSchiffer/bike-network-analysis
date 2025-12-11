@@ -1,8 +1,11 @@
 from abc import ABC, abstractmethod
-import shapely
-import pandas as pd
+
 import geopandas as gpd
+import pandas as pd
+import shapely
+
 from utils.utils import buffer_in_meters
+
 
 class DemandProvider(ABC):
     @abstractmethod
@@ -34,4 +37,9 @@ class VagRadDemandProvider(DemandProvider):
         area_of_interest = buffer_in_meters(point, 50)
         rental_starts = self.rental_data_starting.sindex.query(area_of_interest, predicate='contains')
         rental_endings = self.rental_data_finishing.sindex.query(area_of_interest, predicate='contains')
+        return (len(rental_starts), len(rental_endings))
+    
+    def get_demand_in_polygon(self, polygon: shapely.Polygon) -> tuple[float, float]:
+        rental_starts = self.rental_data_starting.sindex.query(polygon, predicate='contains')
+        rental_endings = self.rental_data_finishing.sindex.query(polygon, predicate='contains')
         return (len(rental_starts), len(rental_endings))
