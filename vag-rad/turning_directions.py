@@ -1,10 +1,11 @@
 # %%
 # imports
+import matplotlib.pyplot as plt
+import numpy as np
 import osmnx as ox
 import shapely
+
 from utils.utils import parse_junction_osmid, parse_old_edge_key
-import numpy as np
-import matplotlib.pyplot as plt
 
 # %%
 # load weighted graph from file
@@ -53,30 +54,29 @@ for label in ax.get_yticklabels():
     label.set_verticalalignment('bottom')
 
 # xticks from -180° to 180°
-ax.set_xticks(np.deg2rad(np.arange(0, 360, 45)))
-ax.set_xticklabels(['0°', '-45°', '-90°', '-135°', '+/-180°', '135°', '90°', '45°'])
+ax.set_xticks(np.deg2rad([0, 60, 90, 180, 270, 300]))
+ax.set_xticklabels(['0°', '-60°', '-90°', '+/-180°', '90°', '60°'])
 
 # define colors for certain angle ranges
 angle_colors = {
-    'straight': 'green',
-    'left': 'blue',
-    'right': 'red',
-    'u_turn': 'purple'
+    'straight': '#a6cee3',
+    'left': '#b2df8a',
+    'right': '#fb9a99'
 }
 # color bars based on angle ranges
 for bar, turn_angle in zip(ax.patches, bin_centers_deg):
-    if turn_angle < -170:
-        bar.set_color(angle_colors['u_turn'])
-    elif turn_angle >= -170 and turn_angle < -60:
+    if turn_angle < -60:
         bar.set_color(angle_colors['left'])
-    elif turn_angle >= -60 and turn_angle <= 60:
-        bar.set_color(angle_colors['straight'])
-    elif turn_angle > 60 and turn_angle <= 170:
+    elif turn_angle > 60 :
         bar.set_color(angle_colors['right'])
-    elif turn_angle > 170:
-        bar.set_color(angle_colors['u_turn'])
+    else:
+        bar.set_color(angle_colors['straight'])
+    bar.set_edgecolor('black')
 
-plt.show()
+#plt.legend(['Straight (-60° to 60°)', 'Left Turn (< -60°)', 'Right Turn (> 60°)'], loc='upper right', bbox_to_anchor=(1.1, 1.1))
+
+#plt.show()
+plt.savefig('turning_angles_polar_plot.png', dpi=300)
 
 # %%
 # plot pie chart to represent the distribution of turning angles
