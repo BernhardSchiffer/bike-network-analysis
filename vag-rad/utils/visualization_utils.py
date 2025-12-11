@@ -35,7 +35,7 @@ def plot_shifted_graph(graph: nx.MultiDiGraph) -> tuple[GeoDataFrame, GeoDataFra
 
     for s, d, key, data in graph.edges(data=True, keys=True):
         try:
-            shifted_geometry = data['shifted_geometry']
+            data['shifted_geometry']
         except KeyError:
             continue
 

@@ -2,6 +2,7 @@
 # imports
 import time
 from collections import Counter
+from enum import Enum
 from typing import Callable
 
 import geopandas as gpd
@@ -271,9 +272,6 @@ gpd.GeoDataFrame({'osmid': [node['osmid'] for node in target_nodes], 'node_id': 
 
 # %%
 # create enum for weight_function
-from enum import Enum
-
-
 class weight_function(Enum):
     SPACIAL_NORMALIZATION = 'spacial_normalization'
     GRAVITY_MODEL = 'gravity_model'

@@ -18,7 +18,6 @@ for u, v, key, data in graph.edges(data=True, keys=True):
     if 'turning_angle' in data:
         turning_angles.append(float(data['turning_angle']))
 # %%
-import matplotlib.pyplot as plt
 
 plt.hist(turning_angles, bins=36, range=(-180, 180), edgecolor='black')
 plt.title('Histogram of Turning Angles in Bicycle Graph')

@@ -16,7 +16,7 @@ from shapely.geometry import LineString
 from tqdm import tqdm
 
 from utils.elevation_provider import DEMElevationProvider
-from utils.graph_types import LEFT, RIGHT, STRAIGHT, U_TURN, EdgeId, TurnDirection
+from utils.graph_types import LEFT, RIGHT, STRAIGHT, EdgeId, TurnDirection
 from utils.polygon_filter import PolygonFilter
 
 type Forward = 'Forward'
