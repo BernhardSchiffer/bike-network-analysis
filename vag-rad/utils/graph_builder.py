@@ -4,6 +4,7 @@ from typing import Callable
 
 import geopandas as gpd
 import networkx as nx
+import numpy as np
 import osmium
 import osmnx as ox
 import pandas as pd
@@ -18,6 +19,13 @@ from utils.elevation_provider import DEMElevationProvider
 from utils.graph_types import LEFT, RIGHT, STRAIGHT, U_TURN, EdgeId, TurnDirection
 from utils.polygon_filter import PolygonFilter
 
+type Forward = 'Forward'
+type Backward = 'Backward'
+type StreetDirection = Forward | Backward
+
+type OsmTags = dict[str, str]
+type StreetFeatureFilter = Callable[[OsmTags, StreetDirection], bool]
+type RouteChoice = tuple[StreetFeatureFilter, float]
 
 def get_edge_by_osmid(graph: nx.MultiDiGraph, osmid) -> EdgeId:
     for edge in graph.edges(data=True, keys=True):
@@ -36,6 +44,19 @@ def get_edge_by_osmid_indexed(lookup: gpd.GeoDataFrame, osmid: str) -> EdgeId:
         raise Exception(f'Multiple edges with osmid {osmid} found in lookup')
     if type(result) is gpd.GeoSeries or type(result) is pd.Series:
         return tuple(result[['u', 'v', 'key']].values)
+    
+def get_street_hierarchy(tags: OsmTags) -> int:
+    highway_value = tags.get('highway', '')
+    if 'primary' in highway_value:
+        return 1
+    elif 'secondary' in highway_value:
+        return 2
+    elif 'tertiary' in highway_value:
+        return 3
+    elif 'residential' in highway_value:
+        return 4
+    else:
+        return 5
 
 def get_angle_between_edges(e1: LineString, e2: LineString):
     # calculate bearing of edges
@@ -60,17 +81,6 @@ def get_turn_direction(turn_angle: float) -> TurnDirection:
         return RIGHT
     else:
         raise ValueError(f'Invalid turn angle: {turn_angle}')
-
-def get_turn_penalty(turn_angle: float) -> float:
-    turn_direction = get_turn_direction(turn_angle)
-    if turn_direction == STRAIGHT:
-        return 0.00001
-    elif turn_direction == LEFT:
-        return 423
-    elif turn_direction == RIGHT:
-        return 221
-    else:
-        raise ValueError(f'Invalid turn direction: {turn_direction}')
 
 def split_nodes(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
     edge_lookup = ox.graph_to_gdfs(graph, nodes=False, edges=True)
@@ -98,17 +108,29 @@ def split_nodes(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
         if len(in_edges) <= 0 or len(out_edges) <= 0:
             continue
 
+        loop_edges = []
         # create new nodes for each out edge
         out_nodes = []
         for out_edge_start, out_edge_dest, out_edge_key, out_edge_data in out_edges:
-            graph.add_nodes_from([ ((out_edge_start, out_edge_dest, out_edge_key), node_data) ])
-            out_nodes.append((out_edge_start, out_edge_dest, out_edge_key))
-            graph.add_edges_from([ ((out_edge_start, out_edge_dest, out_edge_key), out_edge_dest, out_edge_data) ])
+            new_node_id = (out_edge_start, out_edge_dest, out_edge_key)
+            graph.add_nodes_from([ (new_node_id, node_data) ])
+            out_nodes.append(new_node_id)
+            
+            if out_edge_start == out_edge_dest:
+                # loop edge can not be connected jet
+                loop_edges.append((out_edge_start, out_edge_dest, out_edge_key, out_edge_data))
+            graph.add_edges_from([ (new_node_id, out_edge_dest, out_edge_data) ])
 
+        useless_nodes = []
         # create new edges for each in edge and connect them to the out nodes
         for in_edge_start, in_edge_dest, in_edge_key, in_edge_data in in_edges:
             # create new node for each in edge
-            graph.add_nodes_from([((in_edge_start, in_edge_dest, in_edge_key), node_data)])
+            if graph.has_node((in_edge_start, in_edge_dest, in_edge_key)):
+                new_node_id = (in_edge_start, in_edge_dest, in_edge_key+10)
+                useless_nodes.append(new_node_id)
+            else:
+                new_node_id = (in_edge_start, in_edge_dest, in_edge_key)
+            graph.add_nodes_from([(new_node_id, node_data)])
             # create new edges to each out edge
             for out_node, out_edge in zip(out_nodes, out_edges):
                 out_edge_data = out_edge[3]
@@ -121,14 +143,13 @@ def split_nodes(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
                     continue
 
                 turning_angle = get_angle_between_edges(e1['geometry'], e2['geometry'])
-                penalty = get_turn_penalty(turning_angle)
-                weight = penalty
-                graph.add_edge((in_edge_start, in_edge_dest, in_edge_key), out_node, length=0.0, weight=weight, penalty=penalty, turning_angle=turning_angle, osmid=(in_edge_data['osmid'], out_edge_data['osmid']))
+                graph.add_edge(new_node_id, out_node, length=0.0, turning_angle=turning_angle, osmid=(in_edge_data['osmid'], out_edge_data['osmid']))
             # add edge from previous node to new in node
-            graph.add_edges_from([(in_edge_start, (in_edge_start, in_edge_dest, in_edge_key), in_edge_data)])
+            graph.add_edges_from([(in_edge_start, new_node_id, in_edge_data)])
         # remove old node
         graph.remove_node(node_id)
-
+        for useless_node in useless_nodes:
+            graph.remove_node(useless_node)
     return graph
 
 def get_slope_penalty(slope: float) -> float:
@@ -142,14 +163,6 @@ def get_slope_penalty(slope: float) -> float:
         return 3.239
     else:
         raise ValueError(f'Invalid slope value: {slope}')
-    
-type Forward = 'Forward'
-type Backward = 'Backward'
-type StreetDirection = Forward | Backward
-
-type OsmTags = dict[str, str]
-type StreetFeatureFilter = Callable[[OsmTags, StreetDirection], bool]
-type RouteChoice = tuple[StreetFeatureFilter, float]
 
 def is_tag_available(attribute: str, value: str, tags: OsmTags) -> bool:
     if attribute not in tags.keys():
@@ -260,6 +273,79 @@ def is_bikeable_sidewalk(tags: OsmTags, direction: StreetDirection) -> bool:
     else:
         return False
 
+def get_lanes(tags: OsmTags, direction: StreetDirection | None, default: int) -> int:
+    if direction is None:
+        lanes = tags.get('lanes', default)
+    elif direction == Forward:
+        lanes = tags.get('lanes:forward', default)
+    elif direction == Backward:
+        lanes = tags.get('lanes:backward', default)
+    try:
+        return int(lanes)
+    except ValueError:
+        return default
+    
+def is_large_road(tags: OsmTags, direction: StreetDirection) -> bool:
+    return any(is_tag_available('highway', hw, tags) for hw in ['primary', 'secondary', 'tertiary', 'unclassified']) and (
+        get_lanes(tags, None, default=1) >= 2 or (
+            get_lanes(tags, Forward, default=1) >= 2 or get_lanes(tags, Backward, default=1) >= 2
+            )
+        )
+
+def large_road_with_bike_track(tags: OsmTags, direction: StreetDirection) -> bool:
+    return is_large_road(tags, direction) and has_bike_track(tags, direction)
+
+def large_road_with_bike_lane(tags: OsmTags, direction: StreetDirection) -> bool:
+    return is_large_road(tags, direction) and has_bike_lane(tags, direction)
+
+def large_road_no_bike_infra(tags: OsmTags, direction: StreetDirection) -> bool:
+    return is_large_road(tags, direction) and not has_bike_lane(tags, direction) and not has_bike_track(tags, direction)
+
+def is_medium_road(tags: OsmTags, direction: StreetDirection) -> bool:
+    return any(is_tag_available('highway', hw, tags) for hw in ['primary', 'secondary', 'tertiary', 'unclassified']) and not get_lanes(tags, None, default=5) >= 2 and not (get_lanes(tags, Forward, default=5) >= 2 or get_lanes(tags, Backward, default=5) >= 2)
+
+def medium_road_with_bike_track(tags: OsmTags, direction: StreetDirection) -> bool:
+    return is_medium_road(tags, direction) and has_bike_track(tags, direction)
+
+def medium_road_with_bike_lane(tags: OsmTags, direction: StreetDirection) -> bool:
+    return is_medium_road(tags, direction) and has_bike_lane(tags, direction)
+
+def medium_road_no_bike_infra(tags: OsmTags, direction: StreetDirection) -> bool:
+    return is_medium_road(tags, direction) and not has_bike_lane(tags, direction) and not has_bike_track(tags, direction)
+
+def residential_road_with_bike_track(tags: OsmTags, direction: StreetDirection) -> bool:
+    return is_residential_road(tags, direction) and has_bike_track(tags, direction)
+
+def residential_road_with_bike_lane(tags: OsmTags, direction: StreetDirection) -> bool:
+    return is_residential_road(tags, direction) and (has_bike_lane(tags, direction) or is_bike_road(tags, direction))
+
+def residential_road_no_bike_infra(tags: OsmTags, direction: StreetDirection) -> bool:
+    return is_residential_road(tags, direction) and not has_bike_lane(tags, direction) and not has_bike_track(tags, direction) and not is_bike_road(tags, direction)
+
+def is_shared_path(tags: OsmTags, direction: StreetDirection) -> bool:
+    return tags.get('bicycle', None) == 'designated' and tags.get('foot', None) == 'designated'
+
+def is_wrong_way(tags: OsmTags, direction: StreetDirection) -> bool:
+    if tags.get('oneway', None) == 'yes' and direction == Backward:
+        return True
+    else:
+        return False
+
+def has_gravel(tags: OsmTags, direction: StreetDirection) -> bool:
+    return tags.get('surface', None) == 'gravel'
+
+def has_cobblestone(tags: OsmTags, direction: StreetDirection) -> bool:
+    return any(tags.get('surface', None) == surf for surf in ['cobblestone', 'unhewn_cobblestone', 'sett'])
+
+def is_padestrian_zone(tags: OsmTags, direction: StreetDirection) -> bool:
+    return tags.get('highway', None) == 'pedestrian'
+
+def is_cycleway(tags: OsmTags, direction: StreetDirection) -> bool:
+    return tags.get('highway', None) == 'cycleway' or (tags.get('bicycle', None) == 'designated' and tags.get('foot', False) != 'designated')
+
+def is_footway(tags: OsmTags, direction: StreetDirection) -> bool:
+    return tags.get('highway', None) == 'footway' or (tags.get('foot', None) == 'designated' and tags.get('bicycle', False) != 'designated')
+
 # define benefits and penalties for edges according to their osm features
 route_choice_model_1: list[RouteChoice] = [
     (has_bike_lane, -0.16),
@@ -278,75 +364,6 @@ route_choice_model_1: list[RouteChoice] = [
     (is_bikeable_sidewalk, 0.30)
 ]
 
-def get_lanes(tags: OsmTags, direction: StreetDirection | None, default: int) -> int:
-    if direction is None:
-        lanes = tags.get('lanes', default)
-    elif direction == Forward:
-        lanes = tags.get('lanes:forward', default)
-    elif direction == Backward:
-        lanes = tags.get('lanes:backward', default)
-    try:
-        return int(lanes)
-    except ValueError:
-        return default
-    
-def is_large_road(tags: OsmTags, direction: StreetDirection) -> bool:
-    return any(is_tag_available('highway', hw, tags) for hw in ['primary', 'secondary', 'tertiary', 'unclassified']) and (get_lanes(tags, None, default=1) >= 3 or (get_lanes(tags, Forward, default=1) >= 2 or get_lanes(tags, Backward, default=1) >= 2))
-
-def large_road_with_bike_track(tags: OsmTags, direction: StreetDirection) -> bool:
-    return is_large_road(tags, direction) and has_bike_track(tags, direction)
-
-def large_road_with_bike_lane(tags: OsmTags, direction: StreetDirection) -> bool:
-    return is_large_road(tags, direction) and has_bike_lane(tags, direction)
-
-def large_road_no_bike_infra(tags: OsmTags, direction: StreetDirection) -> bool:
-    return is_large_road(tags, direction) and not has_bike_lane(tags, direction) and not has_bike_track(tags, direction)
-
-def is_medium_road(tags: OsmTags, direction: StreetDirection) -> bool:
-    return any(is_tag_available('highway', hw, tags) for hw in ['primary', 'secondary', 'tertiary', 'unclassified']) and not get_lanes(tags, None, default=5) >= 3 and not (get_lanes(tags, Forward, default=5) >= 2 or get_lanes(tags, Backward, default=5) >= 2)
-
-def medium_road_with_bike_track(tags: OsmTags, direction: StreetDirection) -> bool:
-    return is_medium_road(tags, direction) and has_bike_track(tags, direction)
-
-def medium_road_with_bike_lane(tags: OsmTags, direction: StreetDirection) -> bool:
-    return is_medium_road(tags, direction) and has_bike_lane(tags, direction)
-
-def medium_road_no_bike_infra(tags: OsmTags, direction: StreetDirection) -> bool:
-    return is_medium_road(tags, direction) and not has_bike_lane(tags, direction) and not has_bike_track(tags, direction)
-
-def residential_road_with_bike_track(tags: OsmTags, direction: StreetDirection) -> bool:
-    return is_residential_road(tags, direction) and has_bike_track(tags, direction)
-
-def residential_road_with_bike_lane(tags: OsmTags, direction: StreetDirection) -> bool:
-    return is_residential_road(tags, direction) and has_bike_lane(tags, direction)
-
-def residential_road_no_bike_infra(tags: OsmTags, direction: StreetDirection) -> bool:
-    return is_residential_road(tags, direction) and not has_bike_lane(tags, direction) and not has_bike_track(tags, direction)
-
-def is_shared_path(tags: OsmTags, direction: StreetDirection) -> bool:
-    return tags.get('highway', None) in ['path', 'track', 'service']
-
-def is_wrong_way(tags: OsmTags, direction: StreetDirection) -> bool:
-    if tags.get('oneway', None) == 'yes' and direction == Backward:
-        return True
-    else:
-        return False
-
-def has_gravel(tags: OsmTags, direction: StreetDirection) -> bool:
-    return tags.get('surface', None) == 'gravel'
-
-def has_cobblestone(tags: OsmTags, direction: StreetDirection) -> bool:
-    return tags.get('surface', None) == 'cobblestone'
-
-def is_padestrian_zone(tags: OsmTags, direction: StreetDirection) -> bool:
-    return tags.get('highway', None) == 'pedestrian'
-
-def is_cycleway(tags: OsmTags, direction: StreetDirection) -> bool:
-    return tags.get('highway', None) == 'cycleway'
-
-def is_footway(tags: OsmTags, direction: StreetDirection) -> bool:
-    return tags.get('highway', None) == 'footway'
-
 route_choice_model_2: list[RouteChoice] = [
     (medium_road_with_bike_track, 0.0),
     (medium_road_with_bike_lane, 0.050),
@@ -364,6 +381,23 @@ route_choice_model_2: list[RouteChoice] = [
     (is_padestrian_zone, 0.368),
     (is_cycleway, -0.038),
     (is_footway, 0.506),
+]
+
+route_choice_model_mixed: list[RouteChoice] = [
+    (has_bike_lane, -0.16),
+    (has_bike_path, -0.16),
+    (has_exclusive_bike_path, -0.16),
+    (has_bike_track, -0.16),
+    (is_bike_road, -0.10),
+    (is_primary_road, 7.15),
+    (is_secondary_road, 1.00),
+    (is_tertiary_road, 0.37),
+    (is_residential_road, 0.10),
+    (is_bikeable_padestrian_street, 0.20),
+    (bike_dismount_required, 0.40),
+    (is_segregated_bike_and_footpath, 0.10),
+    (is_not_segregated_bike_and_footpath, 0.20),
+    (is_bikeable_sidewalk, 0.30)
 ]
 
 class GraphBuilder:
@@ -446,7 +480,7 @@ class GraphBuilder:
                     tags = {**tags, **tag}
             else:
                 tags = self.edges_osm_data_lookup.loc[osmid]['tags']
-            if data['oneway'] == True and (tags.get('oneway:bicycle', None) == 'no' or tags.get('cycleway', None) == 'opposite'):
+            if data['oneway'] and (tags.get('oneway:bicycle', None) == 'no' or tags.get('cycleway', None) == 'opposite'):
                 # check if the path is also oneway for bikes
                 graph.edges[u, v, key]['oneway'] = False
                 data_for_reversed_path = data.copy()
@@ -475,7 +509,7 @@ class GraphBuilder:
                     tags = {**tags, **tag}
             else:
                 tags = self.edges_osm_data_lookup.loc[osmid]['tags']
-            if tags.get('oneway:bicycle', None) == 'yes' and data.get('reversed', False) == True:
+            if tags.get('oneway:bicycle', None) == 'yes' and data.get('reversed', False):
                 if graph.has_edge(u, v, key):
                     edges_to_remove.append((u, v, key))
         print(f'removing {len(edges_to_remove)} edges that are oneway for bikes')
@@ -518,12 +552,43 @@ class GraphBuilder:
         graph = self.set_node_elevation(graph)
         slope_percentages: dict[tuple[int, int, int], dict[str, float]] = {}
 
-        for u, v, key, e_data in graph.edges(data=True, keys=True):
-            start_node = graph.nodes[u]
-            dest_node = graph.nodes[v]
+        for u, v, key, e_data in tqdm(graph.edges(data=True, keys=True), desc='calculating edge slopes', total=len(graph.edges), unit='edges'):
+            osmid = e_data['osmid']
+            tags = self.edges_osm_data_lookup.loc[osmid]['tags']
+            if tags.get('tunnel', False) or tags.get('layer', None) == '-1' or tags.get('bridge', False):
+                # skip tunnels
+                slope_percentages[u, v, key] = {'slope_percentage': 0.0}
+                continue
+            elevations = []
+            line: shapely.LineString = e_data.get('geometry')
+
+            num_of_segments = e_data['length'] / 5
+            segment_length = line.length / num_of_segments
+            line = line.segmentize(max_segment_length=segment_length)
+
+            for coord in line.coords:
+                lon = coord[0]
+                lat = coord[1]
+                elevation = self.elevation_provider.get_elevation(lon, lat)
+                elevations.append(elevation)
+            slopes = []
+
+            for i in range(len(elevations)-1):
+                h_diff = elevations[i+1] - elevations[i]
+                horizontal_dist = e_data['length'] / segment_length
+                slope = (h_diff / horizontal_dist) * 100
+                slopes.append(slope)
+
+            if len(slopes) > 2:
+                slopes.remove(max(slopes))
+                slopes.remove(min(slopes))
+                slope_percentage = np.median(slopes)
+            else:
+                start_node = graph.nodes[u]
+                dest_node = graph.nodes[v]
             
-            hight_diff = dest_node['elevation'] - start_node['elevation']
-            slope_percentage = (hight_diff / e_data['length']) * 100
+                hight_diff = dest_node['elevation'] - start_node['elevation']
+                slope_percentage = (hight_diff / e_data['length']) * 100
 
             slope_percentages[u, v, key] = {'slope_percentage': float(slope_percentage)}
             
@@ -531,7 +596,7 @@ class GraphBuilder:
 
         return graph
 
-    def get_weight(self, u, v, data: dict) -> float:
+    def get_penalty(self, u, v, data: dict) -> float:
         try:
             osmid = data['osmid']
             streetDirection: StreetDirection
@@ -593,27 +658,81 @@ class GraphBuilder:
         
         return applied_filters
     
+    def get_turn_penalty(self,graph: nx.MultiDiGraph, edge_id: EdgeId, turn_angle: float) -> float:
+        MILES_IN_METERS = 1609.34
+        DEFAULT_TURN_PENALTY = MILES_IN_METERS * 0.042
+        turn_direction = get_turn_direction(turn_angle)
+        
+        in_edge = list(graph.in_edges(edge_id[0], data=True, keys=True))
+        in_edge_data = in_edge[0][3]
+        in_osmid = in_edge_data['osmid']
+        in_tags = self.edges_osm_data_lookup.loc[in_osmid]['tags']
+
+        out_edge = list(graph.out_edges(edge_id[1], data=True, keys=True))
+        out_edge_data = out_edge[0][3]
+        out_osmid = out_edge_data['osmid']
+        out_tags = self.edges_osm_data_lookup.loc[out_osmid]['tags']
+        
+        in_hierarchy = get_street_hierarchy(in_tags)
+        out_hierarchy = get_street_hierarchy(out_tags)
+
+        if turn_direction == STRAIGHT:
+            if in_hierarchy > out_hierarchy:
+                return DEFAULT_TURN_PENALTY
+            # minimal penalty because dijkstra is not stable with zero weighted edges
+            return 0.00001
+
+        if out_hierarchy == 1:
+            # primary and secondary
+            if turn_direction == LEFT:
+                return MILES_IN_METERS * 0.231
+            elif turn_direction == RIGHT:
+                return MILES_IN_METERS * 0.322
+
+        if out_hierarchy == 2:
+            # secondary
+            if turn_direction == LEFT:
+                return MILES_IN_METERS * 0.091
+            elif turn_direction == RIGHT:
+                return MILES_IN_METERS * 0.059
+        
+        if out_hierarchy == 3:
+            # tertiary
+            if turn_direction == LEFT:
+                return MILES_IN_METERS * 0.091
+            elif turn_direction == RIGHT:
+                return MILES_IN_METERS * 0.038
+        
+        # default turn penalty
+        return DEFAULT_TURN_PENALTY
+    
     # calculate edge weights according to their osm features
     def set_edge_weights(self, graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
         weights: dict[tuple[int, int, int], dict[str, float]] = {}
         penalties: dict[tuple[int, int, int], dict[str, float]] = {}
         applied_filters: dict[tuple[int, int, int], dict[str, list[str]]] = {}
+        turning_directions: dict[tuple[int, int, int], dict[str, TurnDirection]] = {}
         problematic_osmids = []
         for u, v, key, data in tqdm(graph.edges(data=True, keys=True), desc='calculating edge weights', total=len(graph.edges), unit='edges'):
             if type(data['osmid']) is tuple:
-                # skip edges that are created during node splitting
-                # can be used to penalize node attributes later
-                continue
-            try:
-                penalty = self.get_weight(u, v, data)
+                # edge is turning edge
+                turning_angle = data.get('turning_angle', 0.0)
+                turn_direction = get_turn_direction(turning_angle)
+                turning_directions[u,v,key] = {'turn_direction': turn_direction}
+                penalty = self.get_turn_penalty(graph, (u, v, key), turning_angle)
                 penalties[u,v,key] = {'penalty': penalty}
-                weights[u,v,key] = {'weight': float(data['length'] * (1.0 + penalty))}
-                applied_filters[u,v,key] = {'applied_filters': self.get_applied_filters(u, v, data)}
-            except:
-                problematic_osmids.append(data['osmid'])
-                penalty = 1.0
-                penalties[u,v,key] = {'penalty': penalty}
-                weights[u,v,key] = {'weight': float(data['length'] * penalty)}
+                weights[u,v,key] = {'weight': penalty}
+            else:
+                try:
+                    penalty = self.get_penalty(u, v, data)
+                    penalties[u,v,key] = {'penalty': penalty}
+                    weights[u,v,key] = {'weight': float(data['length'] * penalty)}
+                    applied_filters[u,v,key] = {'applied_filters': self.get_applied_filters(u, v, data)}
+                except:
+                    problematic_osmids.append(data['osmid'])
+                    penalty = 1.0
+                    penalties[u,v,key] = {'penalty': penalty}
+                    weights[u,v,key] = {'weight': float(data['length'] * penalty)}
 
         if len(problematic_osmids) > 0:
             print(f'found problems with {len(problematic_osmids)} edges: {problematic_osmids}')
@@ -623,10 +742,11 @@ class GraphBuilder:
         nx.set_edge_attributes(graph, weights)
         nx.set_edge_attributes(graph, penalties)
         nx.set_edge_attributes(graph, applied_filters)
+        nx.set_edge_attributes(graph, turning_directions)
 
         return graph
 
-    def enforce_restrictions(self, graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
+    def enforce_restrictions(self, graph: nx.MultiDiGraph, verbose: bool = False) -> nx.MultiDiGraph:
         graph = graph.copy()
         # load restrictions
         self.load_osm_restrictions(self.area)
@@ -653,7 +773,8 @@ class GraphBuilder:
                     except KeyError:
                         continue
                     except (IndexError, Exception) as e:
-                        print(f'Error occurred while processing restriction {data}: {e}')
+                        if verbose:
+                            print(f'Error occurred while processing restriction {data}: {e}')
                         continue
                     # get all edges that are not the only edge
                     edges_to_remove = []
@@ -671,7 +792,8 @@ class GraphBuilder:
                     except KeyError:
                         continue
                     except (IndexError, Exception) as e:
-                        print(f'Error occurred while processing restriction {data}: {e}')
+                        if verbose:
+                            print(f'Error occurred while processing restriction {data}: {e}')
                         continue
 
                     try:
