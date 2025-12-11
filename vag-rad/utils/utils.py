@@ -127,7 +127,198 @@ def get_arrow_head(start: list[float], dest: list[float], color: str) -> leafmap
 def transform_coordinates(coords: list[list[float]], transformer: Transformer) -> list[float]:
     return [transformer.transform(coord[0], coord[1]) for coord in coords]
 
+node_offset = 0.00002
+line_offset = 0.00001
 def shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
+    #graph = graph.copy()
+
+    # calculate shifted coordinates for each node
+    for node in tqdm(graph.nodes, desc='Calculating shifted coordinates', unit='nodes'):
+        in_edges = graph.in_edges(node, keys=True, data=True, default=[])
+        out_edges = graph.out_edges(node, keys=True, data=True, default=[])
+        edges = [*in_edges, *out_edges]
+
+        if len(edges) < 1:
+            # isolated node
+            continue
+        if len(edges) == 1 or (len(in_edges) == 0 or len(out_edges) == 0):
+            # end node
+            u, v, key, data = edges[0]
+            line: shapely.LineString = data.get('geometry', None)
+            if line is None:
+                continue
+            # shift line 1 unit to the left
+            line_coords = list(line.coords)
+            if line_coords[0] == line_coords[-1]:
+                # line is closed
+                # move last and first point slightly
+                line = shapely.ops.substring(line, 0.000001, line.length)
+            shifted_line = line.parallel_offset(line_offset, side='right', join_style='mitre')
+            if shifted_line.is_empty:
+                shifted_line = line
+            if len(out_edges) == 1 or len(in_edges) == 0:
+                graph.nodes[node]['x_shifted'] = shifted_line.xy[0][0]
+                graph.nodes[node]['y_shifted'] = shifted_line.xy[1][0]
+            if len(in_edges) == 1 or len(out_edges) == 0:
+                graph.nodes[node]['x_shifted'] = shifted_line.xy[0][-1]
+                graph.nodes[node]['y_shifted'] = shifted_line.xy[1][-1]
+            continue
+        if len(edges) > 1:
+            in_street_edges = []
+            out_street_edges = []
+
+            for u, v, key, data in in_edges:
+                if 'geometry' in data:
+                    in_street_edges.append((u, v, key, data))
+                else:
+                    in_street_edges.append(*graph.in_edges(u, keys=True, data=True, default=[]))
+            for u, v, key, data in out_edges:
+                if 'geometry' in data:
+                    out_street_edges.append((u, v, key, data))
+                else:
+                    out_street_edges.append(*graph.out_edges(v, keys=True, data=True, default=[]))
+
+            # shift geometries of in_street_edges
+            shifted_lines = []
+            for u, v, key, data in in_street_edges:
+                line: shapely.LineString = data.get('geometry', None)
+                if line is None:
+                    continue
+                # shift line 1 unit to the left
+                line_coords = list(line.coords)
+                if line_coords[0] == line_coords[-1]:
+                    # line is closed
+                    # move last and first point slightly
+                    line = shapely.ops.substring(line, 0.000001, line.length)
+                shifted_line = line.parallel_offset(line_offset, 'right', join_style='mitre')
+                if shifted_line.is_empty:
+                    shifted_line = line
+                shifted_lines.append(shifted_line)
+            in_street_edges = shifted_lines
+
+            shifted_lines = []
+            for u, v, key, data in out_street_edges:
+                line: shapely.LineString = data.get('geometry', None)
+                if line is None:
+                    continue
+                # shift line 1 unit to the left
+                line_coords = list(line.coords)
+                if line_coords[0] == line_coords[-1]:
+                    # line is closed
+                    # move last and first point slightly
+                    line = shapely.ops.substring(line, 0.000001, line.length)
+                shifted_line = line.parallel_offset(line_offset, 'right', join_style='mitre')
+                if shifted_line.is_empty:
+                    shifted_line = line
+                shifted_lines.append(shifted_line)
+            out_street_edges: list[shapely.LineString] = shifted_lines
+
+            is_start_node = 'geometry' in list(out_edges)[0][3]
+            is_end_node = 'geometry' in list(in_edges)[0][3]
+            
+            if is_start_node:
+                intersections = out_street_edges[0].intersection(shapely.MultiLineString(in_street_edges))
+            else:
+                intersections = in_street_edges[0].intersection(shapely.MultiLineString(out_street_edges))
+
+            if intersections.is_empty or type(intersections) is shapely.LineString or type(intersections) is shapely.MultiLineString:
+                if is_start_node:
+                    line: shapely.LineString = out_street_edges[0]
+                else:
+                    line: shapely.LineString = in_street_edges[0]
+
+                shifted_line = line
+                if is_start_node:
+                    shifted_point = shifted_line.line_interpolate_point(node_offset)
+                    graph.nodes[node]['x_shifted'] = shifted_point.x
+                    graph.nodes[node]['y_shifted'] = shifted_point.y
+                if is_end_node:
+                    shifted_point = shifted_line.line_interpolate_point(shifted_line.length - node_offset)
+                    graph.nodes[node]['x_shifted'] = shifted_point.x
+                    graph.nodes[node]['y_shifted'] = shifted_point.y
+            else:
+                if type(intersections) is shapely.Point:
+                    if is_start_node:
+                        offset = out_street_edges[0].line_locate_point(intersections)
+                        # get line segment from intersection to end of out_street_edges[0]
+                        point = out_street_edges[0].line_interpolate_point(offset + node_offset)
+                        graph.nodes[node]['x_shifted'] = point.x
+                        graph.nodes[node]['y_shifted'] = point.y
+                    else:
+                        # get line segment from start of in_street_edges[0] to intersection
+                        offset = in_street_edges[0].line_locate_point(intersections)
+                        point = in_street_edges[0].line_interpolate_point(offset - node_offset)
+                        graph.nodes[node]['x_shifted'] = point.x
+                        graph.nodes[node]['y_shifted'] = point.y
+                else:
+                    points = list(intersections.geoms)
+                    if is_start_node:
+                        offsets = []
+                        for in_edge in in_street_edges:
+                            intersections = out_street_edges[0].intersection(in_edge)
+                            if type(intersections) is shapely.MultiPoint:
+                                tmp_offsets = []
+                                for point in list(intersections.geoms):
+                                    offset = out_street_edges[0].line_locate_point(point)
+                                    tmp_offsets.append(offset)
+                                offsets.append(min(tmp_offsets))
+                            if type(intersections) is shapely.Point:
+                                offset = out_street_edges[0].line_locate_point(intersections)
+                                offsets.append(offset)
+                        offset = max(offsets)
+                        point = out_street_edges[0].line_interpolate_point(offset + node_offset)
+                        graph.nodes[node]['x_shifted'] = point.x
+                        graph.nodes[node]['y_shifted'] = point.y
+                    else:
+                        offsets = []
+                        for out_edge in out_street_edges:
+                            intersections = in_street_edges[0].intersection(out_edge)
+                            if type(intersections) is shapely.MultiPoint:
+                                tmp_offsets = []
+                                for point in list(intersections.geoms):
+                                    offset = in_street_edges[0].line_locate_point(point)
+                                    tmp_offsets.append(offset)
+                                offsets.append(max(tmp_offsets))
+                            if type(intersections) is shapely.Point:
+                                offset = in_street_edges[0].line_locate_point(intersections)
+                                offsets.append(offset)
+                        offset = min(offsets)
+                        point = in_street_edges[0].line_interpolate_point(offset - node_offset)
+                        graph.nodes[node]['x_shifted'] = point.x
+                        graph.nodes[node]['y_shifted'] = point.y
+    
+    for edge in graph.edges(data=True, keys=True):
+        u, v, key, data = edge
+        if 'geometry' not in data:
+            origin = shapely.Point([graph.nodes[u]['x_shifted'], graph.nodes[u]['y_shifted']])
+            destination = shapely.Point([graph.nodes[v]['x_shifted'], graph.nodes[v]['y_shifted']])
+            line = shapely.LineString([origin, destination])
+            graph.edges[u, v, key]['shifted_geometry'] = line
+        else:
+            line: shapely.LineString = data['geometry']
+            line_coords = list(line.coords)
+            if line_coords[0] == line_coords[-1]:
+                # line is closed
+                # move last and first point slightly
+                line = shapely.ops.substring(line, 0.000001, line.length)
+            shifted_line = line.parallel_offset(line_offset, side='right', join_style='mitre')
+            if shifted_line.is_empty:
+                shifted_line = line
+
+            line_coords_start = shapely.Point(graph.nodes[u]['x_shifted'], graph.nodes[u]['y_shifted'])
+            line_coords_dest = shapely.Point(graph.nodes[v]['x_shifted'], graph.nodes[v]['y_shifted'])
+
+            origin_offset = shifted_line.line_locate_point(line_coords_start)
+            dest_offset = shifted_line.line_locate_point(line_coords_dest)
+
+            # get line segment from origin_offset to dest_offset
+            shifted_edge = shapely.ops.substring(shifted_line, origin_offset, dest_offset)
+
+            graph.edges[u, v, key]['shifted_geometry'] = shifted_edge
+
+    return graph
+
+def old_shift_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
     graph = graph.copy()
 
     # calculate shifted coordinates for each node

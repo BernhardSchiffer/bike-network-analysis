@@ -11,32 +11,33 @@ from tqdm import tqdm
 from utils.utils import get_reversed_key
 
 
-def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame, GeoDataFrame | None]:
-    debug_marker_df = None
+def plot_shifted_graph(graph: nx.MultiDiGraph) -> tuple[GeoDataFrame, GeoDataFrame]:
+    nodes_data = {'osmid': [], 'geometry': [], 'label': []}
 
-    if debug_marker:
-        debug_marker_df = {'osmid': [], 'geometry': [], 'label': []}
-    
-        for node in graph.nodes:
-            try:
-                x_shifted = graph.nodes[node]['x_shifted']
-                y_shifted = graph.nodes[node]['y_shifted']
-                debug_marker_df['geometry'].append(shapely.Point([x_shifted, y_shifted]))
-                debug_marker_df['label'].append(f'{node}')
-                debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
-            except:
-                x_shifted = graph.nodes[node]['x']
-                y_shifted = graph.nodes[node]['y']
-                debug_marker_df['geometry'].append(shapely.Point([x_shifted, y_shifted]))
-                debug_marker_df['label'].append(f'{node}')
-                debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
-            
-        debug_marker_df = GeoDataFrame(debug_marker_df, crs='EPSG:4326')
+    for node in graph.nodes:
+        try:
+            x_shifted = graph.nodes[node]['x_shifted']
+            y_shifted = graph.nodes[node]['y_shifted']
+            nodes_data['geometry'].append(shapely.Point([x_shifted, y_shifted]))
+            nodes_data['label'].append(f'{node}')
+            nodes_data['osmid'].append(graph.nodes[node]['osmid'])
+        except:
+            x_shifted = graph.nodes[node]['x']
+            y_shifted = graph.nodes[node]['y']
+            nodes_data['geometry'].append(shapely.Point([x_shifted, y_shifted]))
+            nodes_data['label'].append(f'{node}')
+            nodes_data['osmid'].append(graph.nodes[node]['osmid'])
+        
+    nodes_df = GeoDataFrame(nodes_data, crs='EPSG:4326')
     
     # plot edges
     edges_data = {'u': [], 'v': [], 'key': [], 'osmid': [], 'geometry': [], 'color': [], 'tooltip': []}
 
-    for s, d, key, data in tqdm(graph.edges(data=True, keys=True), desc='Plotting edges', unit='edges'):
+    for s, d, key, data in graph.edges(data=True, keys=True):
+        try:
+            shifted_geometry = data['shifted_geometry']
+        except KeyError:
+            continue
 
         reversed = data.get('reversed', None)
 
@@ -71,26 +72,27 @@ def plot_shifted_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoD
     edges_df = GeoDataFrame(edges_data, crs='EPSG:4326')
     edges_df.set_index(['u', 'v', 'key'], inplace=True)
 
-    return edges_df, debug_marker_df
+    return edges_df, nodes_df
 
-def plot_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame, GeoDataFrame | None]:
-    debug_marker_df = None
+def plot_graph(graph: nx.MultiDiGraph) -> tuple[GeoDataFrame, GeoDataFrame]:
+    already_added_nodes: set[str] = set()
+    nodes_data = {'osmid': [], 'geometry': [], 'label': []}
 
-    if debug_marker:
-        debug_marker_df = {'osmid': [], 'geometry': [], 'label': []}
-    
-        for node in graph.nodes:
-            debug_marker_df['osmid'].append(graph.nodes[node]['osmid'])
-            debug_marker_df['geometry'].append(shapely.Point([graph.nodes[node]['x'], graph.nodes[node]['y']]))
-            debug_marker_df['label'].append(f'{node} original')
-            
-        debug_marker_df = GeoDataFrame(debug_marker_df, crs='EPSG:4326')
+    for node in graph.nodes:
+        osmid = graph.nodes[node]['osmid']
+        if osmid in already_added_nodes:
+            continue
+        already_added_nodes.add(osmid)
+        nodes_data['osmid'].append(osmid)
+        nodes_data['geometry'].append(shapely.Point([graph.nodes[node]['x'], graph.nodes[node]['y']]))
+        nodes_data['label'].append(node)
+        
+    nodes_df = GeoDataFrame(nodes_data, crs='EPSG:4326')
     
     # plot edges
     edges_data = {'u': [], 'v': [], 'key': [], 'geometry': [], 'color': [], 'tooltip': []}
 
-    for s, d, key, data in tqdm(graph.edges(data=True, keys=True), desc='Plotting edges', unit='edges'):
-
+    for s, d, key, data in graph.edges(data=True, keys=True):
         color = data['color'] if 'color' in data else 'black'
 
         edges_data['u'].append(s)
@@ -106,7 +108,7 @@ def plot_graph(graph: nx.MultiDiGraph, debug_marker=False) -> tuple[GeoDataFrame
     edges_df = GeoDataFrame(edges_data, crs='EPSG:4326')
     edges_df.set_index(['u', 'v', 'key'], inplace=True)
 
-    return edges_df, debug_marker_df
+    return edges_df, nodes_df
 
 
 def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], expanded: bool = False) -> DataFrame:
