@@ -13,7 +13,7 @@ from utils.graph_builder import (
 )
 from utils.overpass_utils import fetch_city_polygon
 from utils.utils import buffer_in_meters, shift_graph
-from utils.visualization_utils import plot_shifted_graph
+from utils.visualization_utils import plot_graph, plot_shifted_graph
 
 # %%
 # fetch graph of all streets available by bike
@@ -21,11 +21,11 @@ from utils.visualization_utils import plot_shifted_graph
 place_name = 'Nürnberg'
 nbg_area = fetch_city_polygon(place_name)
 
-# create bbox with 4km buffer around nuremberg area
-query_polygon = buffer_in_meters(nbg_area, 4000)
+query_polygon = buffer_in_meters(nbg_area, 5000)
 
 # get poygon of boundingbox
-#bbox = 10.963379,49.559561,10.964554,49.560205
+#bbox = 10.963379,49.559561,10.964554,49.560205 # loop
+#bbox = 11.038926,49.426460,11.039747,49.427441 # test area
 #query_polygon = shapely.box(*bbox)
 
 # use specific overpass settings
@@ -96,7 +96,7 @@ print('number of nodes:', len(graph.nodes))
 graph = split_nodes(graph)
 # enforces turning restrictions
 # these restrictions exist mainly for cars, and have not much of an effect on the routing behavior for bikes
-#graph = graph_builder.enforce_restrictions(graph)
+graph = graph_builder.enforce_restrictions(graph)
 graph = shift_graph(graph)
 
 print('stats of graph after splitting crossing nodes:')
@@ -109,20 +109,17 @@ graph = graph_builder.set_edge_weights(graph)
 graph.remove_nodes_from(list(nx.isolates(graph)))
 
 # save graph to file
-#ox.save_graphml(nx.MultiDiGraph(graph), filepath='simplified_bicycle_graph.graphml')
+ox.save_graphml(nx.MultiDiGraph(graph), filepath='simplified_bicycle_graph.graphml')
 
 # %%
-# plot edges and nodes for debugging purposes
-edges_df, nodes_df = plot_shifted_graph(graph, debug_marker=True)
-edges_df.to_file(filename='debug_graph.gpkg', layer='shifted_routing_graph', driver='GPKG')
-nodes_df.to_file(filename='debug_graph.gpkg', layer='routing_graph_nodes', driver='GPKG')
+# plot edges and nodes
+edges_df, nodes_df = plot_shifted_graph(graph)
+edges_df.to_file(filename='graph.gpkg', layer='shifted_routing_graph_edges', driver='GPKG')
+nodes_df.to_file(filename='graph.gpkg', layer='shifted_routing_graph_nodes', driver='GPKG')
 
-#plot_graph(graph).to_file(filename='graph.gpkg', layer='routing_graph', driver='GPKG')
-
-# %%
-print('number of nodes in graph:', len(graph.nodes))
-intersection_nodes = [node for node, data in graph.nodes(data=True) if node != data['osmid']]
-print(f'number of intersection nodes: {len(intersection_nodes)}')
+edges_df, nodes_df = plot_graph(graph)
+edges_df.to_file(filename='graph.gpkg', layer='routing_graph_edges', driver='GPKG')
+nodes_df.to_file(filename='graph.gpkg', layer='routing_graph_nodes', driver='GPKG')
 
 # %%
 # fetch graph of all streets available by bike
@@ -131,7 +128,7 @@ place_name = 'Nürnberg'
 nbg_area = fetch_city_polygon(place_name)
 
 # create bbox with 4km buffer around nuremberg area
-query_polygon = buffer_in_meters(nbg_area, 4000)
+query_polygon = buffer_in_meters(nbg_area, 5000)
 
 # use specific overpass settings
 ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-21T20:21:22Z"]{maxsize}'
