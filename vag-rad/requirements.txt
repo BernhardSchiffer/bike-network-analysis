@@ -26,7 +26,7 @@ gdown==5.2.0
 geojson==3.2.0
 geopandas==1.0.1
 idna==3.10
-igraph==0.11.8
+-e git+ssh://git@github.com/BernhardSchiffer/python-igraph.git@1d98d797e5f558a6b85937af2a83f8d43f261158#egg=igraph
 ipyevents==2.0.2
 ipyfilechooser==0.6.0
 ipykernel==6.29.5
@@ -48,15 +48,21 @@ jupyterlab_widgets==3.0.13
 kiwisolver==1.4.8
 kmodes==0.12.2
 leafmap==0.42.9
+libpysal==4.13.0
+mapclassify==2.9.0
 MarkupSafe==3.0.2
 matplotlib==3.10.0
 matplotlib-inline==0.1.7
+momepy==0.10.0
 narwhals==1.24.2
 nest-asyncio==1.6.0
 networkx==3.4.2
 numpy==2.2.2
+openpyxl==3.1.5
 osmium==4.0.2
 osmnx==2.0.1
+osrm==0.11.3
+overpy==0.7
 packaging==24.2
 pandas==2.2.3
 parso==0.8.4
@@ -64,6 +70,7 @@ pexpect==4.9.0
 pillow==11.1.0
 platformdirs==4.3.6
 plotly==6.0.0
+polyline==2.0.2
 prompt_toolkit==3.0.50
 psutil==6.1.1
 psycopg2-binary==2.9.10
@@ -74,6 +81,9 @@ Pygments==2.19.1
 pyogrio==0.10.0
 pyparsing==3.2.1
 pyproj==3.7.0
+PyQt5==5.15.11
+PyQt5-Qt5==5.15.17
+PyQt5_sip==12.17.0
 pyshp==2.3.1
 PySocks==1.7.1
 pystac==1.12.1
@@ -90,6 +100,8 @@ rpds-py==0.22.3
 scikit-learn==1.6.1
 scipy==1.15.2
 scooby==0.10.0
+seaborn==0.13.2
+setuptools==78.1.0
 shapely==2.0.7
 six==1.17.0
 soupsieve==2.6
