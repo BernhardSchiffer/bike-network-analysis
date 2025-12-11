@@ -1,6 +1,7 @@
 import overpy
 import shapely
 
+
 def get_line_from_way(way: overpy.Way) -> shapely.LineString:
     line_nodes = []
     for node in way.nodes:
@@ -66,7 +67,7 @@ def get_polygon_from_result(result: overpy.Result) -> shapely.MultiPolygon:
 def fetch_city_polygon(city_name: str, api: overpy.Overpass = overpy.Overpass(url='https://maps.mail.ru/osm/tools/overpass/api/interpreter')) -> shapely.MultiPolygon:
     result = api.query(f"""
                         (
-                            relation[place="city"][name="{city_name}"];
+                            relation[type=boundary][boundary=administrative][name="{city_name}"];
                         );
                         out body;
                         >;
