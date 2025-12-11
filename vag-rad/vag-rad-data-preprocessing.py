@@ -230,22 +230,73 @@ print('calculating if positions are within Nürnberg city polygon...')
 nbg_polygon = fetch_city_polygon('Nürnberg')
 
 start = time.time()
-starting_positions_in_nbg = gpd.GeoSeries(df['starting_position'], crs='EPSG:4326').within(nbg_polygon)
-finishing_positions_in_nbg = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').within(nbg_polygon)
-df['starting_in_nbg'] = starting_positions_in_nbg
-df['finishing_in_nbg'] = finishing_positions_in_nbg
+print(df.shape)
+starting_positions_in_nbg = gpd.GeoSeries(df['starting_position'], crs='EPSG:4326').sindex.query(nbg_polygon, predicate='contains')
+
+df['starting_in_nbg'] = False
+df.loc[starting_positions_in_nbg, 'starting_in_nbg'] = True
+
+finishing_positions_in_nbg = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').sindex.query(nbg_polygon, predicate='contains')
+df['finishing_in_nbg'] = False
+df.loc[finishing_positions_in_nbg, 'finishing_in_nbg'] = True
 print(f'Calculated if positions are within Nürnberg for {len(df)} rows in {time.time() - start:.2f} seconds')
+print('---')
+
+# calculate if positions are within fuerth city polygon
+print('calculating if positions are within Fürth city polygon...')
+fuerth_polygon = fetch_city_polygon('Fürth')
+start = time.time()
+starting_positions_in_fuerth = gpd.GeoSeries(df['starting_position'], crs='EPSG:4326').sindex.query(fuerth_polygon, predicate='contains')
+finishing_positions_in_fuerth = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').sindex.query(fuerth_polygon, predicate='contains')
+df['starting_in_fuerth'] = False
+df.loc[starting_positions_in_fuerth, 'starting_in_fuerth'] = True
+df['finishing_in_fuerth'] = False
+df.loc[finishing_positions_in_fuerth, 'finishing_in_fuerth'] = True
+print(f'Calculated if positions are within Fürth for {len(df)} rows in {time.time() - start:.2f} seconds')
+print('---')
+
+# calculate if positions are within erlangen city polygon
+print('calculating if positions are within Erlangen city polygon...')
+erlangen_polygon = fetch_city_polygon('Erlangen')
+start = time.time()
+starting_positions_in_erlangen = gpd.GeoSeries(df['starting_position'], crs='EPSG:4326').sindex.query(erlangen_polygon, predicate='contains')
+finishing_positions_in_erlangen = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').sindex.query(erlangen_polygon, predicate='contains')
+df['starting_in_erlangen'] = False
+df.loc[starting_positions_in_erlangen, 'starting_in_erlangen'] = True
+df['finishing_in_erlangen'] = False
+df.loc[finishing_positions_in_erlangen, 'finishing_in_erlangen'] = True
+print(f'Calculated if positions are within Erlangen for {len(df)} rows in {time.time() - start:.2f} seconds')
+print('---')
+
+# calculate if positions are within schwabach city polygon
+print('calculating if positions are within Schwabach city polygon...')
+schwabach_polygon = fetch_city_polygon('Schwabach')
+start = time.time()
+starting_positions_in_schwabach = gpd.GeoSeries(df['starting_position'], crs='EPSG:4326').sindex.query(schwabach_polygon, predicate='contains')
+finishing_positions_in_schwabach = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').sindex.query(schwabach_polygon, predicate='contains')
+df['starting_in_schwabach'] = False
+df.loc[starting_positions_in_schwabach, 'starting_in_schwabach'] = True
+df['finishing_in_schwabach'] = False
+df.loc[finishing_positions_in_schwabach, 'finishing_in_schwabach'] = True
+print(f'Calculated if positions are within Schwabach for {len(df)} rows in {time.time() - start:.2f} seconds')
 print('---')
 
 # calculate if positions are within nuremberg free floating zone
 print('calculating if positions are within Nürnberg flexzone...')
 flexzone_nbg = get_vag_rad_flexzone(vag_rad_city_ids['Nürnberg'])
+flexzone_fuerth = get_vag_rad_flexzone(vag_rad_city_ids['Fürth'])
+flexzone_erlangen = get_vag_rad_flexzone(vag_rad_city_ids['Erlangen'])
+flexzone_schwabach = get_vag_rad_flexzone(vag_rad_city_ids['Schwabach'])
+
+flexzone_all = shapely.union_all([flexzone_nbg, flexzone_fuerth, flexzone_erlangen, flexzone_schwabach])
 
 start = time.time()
-starting_in_flexzone = gpd.GeoSeries(df['starting_position'], crs='EPSG:4326').within(flexzone_nbg)
-ending_in_flexzone = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').within(flexzone_nbg)
-df['starting_in_flexzone'] = starting_in_flexzone
-df['ending_in_flexzone'] = ending_in_flexzone
+starting_in_flexzone = gpd.GeoSeries(df['starting_position'], crs='EPSG:4326').sindex.query(flexzone_all, predicate='contains')
+finishing_in_flexzone = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').sindex.query(flexzone_all, predicate='contains')
+df['starting_in_flexzone'] = False
+df.loc[starting_in_flexzone, 'starting_in_flexzone'] = True
+df['finishing_in_flexzone'] = False
+df.loc[finishing_in_flexzone, 'finishing_in_flexzone'] = True
 print(f'Calculated if positions are within Nürnberg flexzone for {len(df)} rows in {time.time() - start:.2f} seconds')
 print('---')
 

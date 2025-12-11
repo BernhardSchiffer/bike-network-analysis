@@ -6,6 +6,7 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import shapely
 
 # %%
@@ -47,7 +48,7 @@ print(f'99th percentile rental duration: {int(p99.total_seconds() // 60)} minute
 durations = df_all['Duration']
 durations = np.divide(durations, 60)  # convert to minutes
 plt.figure(figsize=(10, 6))
-plt.hist(durations, bins=100, range=(0, 100))
+plt.hist(durations, bins=100, range=(0, 100), color='#0072B2')
 plt.title('Histogram of rental durations')
 plt.xlabel('Duration (min)')
 plt.xticks(range(0, 101, 5))
@@ -60,10 +61,10 @@ plt.show()
 distances = df_all['distance_m']
 
 plt.figure(figsize=(10, 6))
-plt.hist(distances, bins=100, range=(100, 5000))
+plt.hist(distances, bins=100, range=(0, 5000))
 plt.title('Histogram of straight-line distances between starting and finishing positions')
 plt.xlabel('Distance (m)')
-plt.xticks(range(0, 5001, 250))
+plt.xticks(range(0, 5001, 250), rotation=45)
 plt.ylabel('Number of rentals')
 plt.grid()
 plt.show()
@@ -153,10 +154,65 @@ plt.tight_layout()
 plt.suptitle('Average number of rentals per hour of day for each day of the week', y=1.02)
 plt.show()
 # %%
-# plot starting and finishing positions
-gpd.GeoDataFrame(df_all['starting_position'], geometry='starting_position').to_file('vag-rad-rentals.gpkg', layer='starting_positions', driver='GPKG')
+# show in which city the rentals start and end
+print('Number of rentals starting in each city:')
+nuremberg_to_fuerth = df_all[df_all['starting_in_nbg'] & df_all['finishing_in_fuerth']]
+nuremberg_to_erlangen = df_all[df_all['starting_in_nbg'] & df_all['finishing_in_erlangen']]
+nuremberg_to_schwabach = df_all[df_all['starting_in_nbg'] & df_all['finishing_in_schwabach']]
+nuremberg_to_nuremberg = df_all[df_all['starting_in_nbg'] & df_all['finishing_in_nbg']]
 
-gpd.GeoDataFrame(df_all['finishing_position'], geometry='finishing_position').to_file('vag-rad-rentals.gpkg', layer='finishing_position', driver='GPKG')
+fuerth_to_nuremberg = df_all[df_all['starting_in_fuerth'] & df_all['finishing_in_nbg']]
+fuerth_to_fuerth = df_all[df_all['starting_in_fuerth'] & df_all['finishing_in_fuerth']]
+fuerth_to_erlangen = df_all[df_all['starting_in_fuerth'] & df_all['finishing_in_erlangen']]
+fuerth_to_schwabach = df_all[df_all['starting_in_fuerth'] & df_all['finishing_in_schwabach']]
+
+erlangen_to_nuremberg = df_all[df_all['starting_in_erlangen'] & df_all['finishing_in_nbg']]
+erlangen_to_fuerth = df_all[df_all['starting_in_erlangen'] & df_all['finishing_in_fuerth']]
+erlangen_to_erlangen = df_all[df_all['starting_in_erlangen'] & df_all['finishing_in_erlangen']]
+erlangen_to_schwabach = df_all[df_all['starting_in_erlangen'] & df_all['finishing_in_schwabach']]
+
+schwabach_to_nuremberg = df_all[df_all['starting_in_schwabach'] & df_all['finishing_in_nbg']]
+schwabach_to_fuerth = df_all[df_all['starting_in_schwabach'] & df_all['finishing_in_fuerth']]
+schwabach_to_erlangen = df_all[df_all['starting_in_schwabach'] & df_all['finishing_in_erlangen']]
+schwabach_to_schwabach = df_all[df_all['starting_in_schwabach'] & df_all['finishing_in_schwabach']]
+
+# display as confusion matrix
+confusion_matrix = np.array([
+    [len(nuremberg_to_nuremberg), len(nuremberg_to_fuerth), len(nuremberg_to_erlangen), len(nuremberg_to_schwabach)],
+    [len(fuerth_to_nuremberg), len(fuerth_to_fuerth), len(fuerth_to_erlangen), len(fuerth_to_schwabach)],
+    [len(erlangen_to_nuremberg), len(erlangen_to_fuerth), len(erlangen_to_erlangen), len(erlangen_to_schwabach)],
+    [len(schwabach_to_nuremberg), len(schwabach_to_fuerth), len(schwabach_to_erlangen), len(schwabach_to_schwabach)],
+])
+
+plt.figure(figsize=(8, 6))
+sns.heatmap(confusion_matrix, annot=True, fmt='d', cmap='viridis', xticklabels=['Nürnberg', 'Fürth', 'Erlangen', 'Schwabach'], yticklabels=['Nürnberg', 'Fürth', 'Erlangen', 'Schwabach'])
+plt.xlabel('Finishing City')
+plt.ylabel('Starting City')
+plt.gca().xaxis.set_label_position('top')
+plt.gca().xaxis.tick_top()
+
+plt.title('Number of rentals starting and ending in each city')
+plt.show()
+
+# %%
+# how many rentals stay within the flexzone, leave the flexzone, go into the flexzone, or stay outside the flexzone
+rides_in_nuremberg = df_all[df_all['starting_in_nbg'] & df_all['finishing_in_nbg']]
+stay_in_flexzone = df_all[df_all['starting_in_nbg'] & df_all['finishing_in_nbg'] & df_all['starting_in_flexzone'] & df_all['finishing_in_flexzone']]
+leave_flexzone = df_all[df_all['starting_in_nbg'] & df_all['finishing_in_nbg'] & df_all['starting_in_flexzone'] & ~df_all['finishing_in_flexzone']]
+going_into_flexzone = df_all[df_all['starting_in_nbg'] & df_all['finishing_in_nbg'] & ~df_all['starting_in_flexzone'] & df_all['finishing_in_flexzone']]
+stay_outside_flexzone = df_all[df_all['starting_in_nbg'] & df_all['finishing_in_nbg'] & ~df_all['starting_in_flexzone'] & ~df_all['finishing_in_flexzone']]
+
+print(f'Number of rentals that start and end within the flexzone: {len(stay_in_flexzone)} ({len(stay_in_flexzone) / len(rides_in_nuremberg):.2%})')
+print(f'Number of rentals that start within the flexzone but end outside: {len(leave_flexzone)} ({len(leave_flexzone) / len(rides_in_nuremberg):.2%})')
+print(f'Number of rentals that start outside the flexzone but end inside: {len(going_into_flexzone)} ({len(going_into_flexzone) / len(rides_in_nuremberg):.2%})')
+print(f'Number of rentals that start and end outside the flexzone: {len(stay_outside_flexzone)} ({len(stay_outside_flexzone) / len(rides_in_nuremberg):.2%})')
+print(f'Total number of rentals that start and end in Nuremberg: {len(rides_in_nuremberg)}')
+
+# %%
+# plot starting and finishing positions
+gpd.GeoDataFrame(df_all['starting_position'], geometry='starting_position', crs='EPSG:4326').to_file('vag-rad-rentals.gpkg', layer='starting_positions', driver='GPKG')
+
+gpd.GeoDataFrame(df_all['finishing_position'], geometry='finishing_position', crs='EPSG:4326').to_file('vag-rad-rentals.gpkg', layer='finishing_position', driver='GPKG')
 
 # %%
 # get all rentals that start and end within nuremberg city polygon
@@ -222,3 +278,64 @@ ending_outside_flexzone = df_all[starting_in_flexzone & ~ending_in_flexzone & en
 print(f'Number of rentals that end outside the flexzone and not at a station: {len(ending_outside_flexzone)}')
 
 # %%
+
+short_rentals = df_all[df_all['distance_m'] < 50]
+short_rentals
+
+# get the duration statistics for short rentals
+print(f'Number of short rentals (less than 100 meters): {len(short_rentals)}')
+median_duration = pd.to_timedelta(short_rentals["Duration"].median(), unit='s')
+minutes, seconds = divmod(median_duration.total_seconds(), 60)
+print(f'Median duration of short rentals: {int(minutes)} minutes and {int(seconds)} seconds')
+# %%
+# get number of bike-sharing starts and endings for heatmap
+from tqdm import tqdm
+from utils.vag_rad_demand_provider import VagRadDemandProvider
+
+from utils.overpass_utils import fetch_city_polygon
+
+place_name = 'Nürnberg'
+nbg_area = fetch_city_polygon(place_name)
+nbg_area
+
+def move_polygon(polygon: shapely.Polygon, x_offset: float, y_offset: float) -> shapely.Polygon:
+    # transform polygon from EPSG:4326 to EPSG:32633
+    polygon = gpd.GeoSeries([polygon], crs='EPSG:4326').to_crs('32633').iloc[0]
+    # move polygon
+    moved_polygon = shapely.affinity.translate(polygon, xoff=x_offset, yoff=y_offset)
+    # transform polygon back to EPSG:4326
+    moved_polygon = gpd.GeoSeries([moved_polygon], crs='32633').to_crs('EPSG:4326').iloc[0]
+    return moved_polygon
+
+bike_sharing_demand_provider = VagRadDemandProvider()
+# move polygon of 100 x 100 meters across the nbg area in steps of 100 meters
+minx, miny, maxx, maxy = 11.014, 49.382, 11.175, 49.508
+#minx, miny, maxx, maxy = nbg_area.bounds
+start_point = shapely.Point(minx, miny)
+# transform point to EPSG:32633
+start_point = gpd.GeoSeries([start_point], crs='EPSG:4326').to_crs('32633').iloc[0]
+polygon = shapely.box(start_point.x, start_point.y, start_point.x + 100, start_point.y + 100)
+# transform polygon back to EPSG:4326
+polygon = gpd.GeoSeries([polygon], crs='EPSG:32633').to_crs('EPSG:4326').iloc[0]
+
+# get side length of polygon in EPSG:4326
+side_length = shapely.Point(polygon.exterior.coords[0]).distance(shapely.Point(polygon.exterior.coords[1]))
+
+max_starts = 0
+max_endings = 0
+min_starts = 0
+min_endings = 0
+
+for x in tqdm(range(int((maxx - minx) / side_length) + 1), desc='calculating max vag rad demand in 100x100m polygon', unit='x step'):
+    for y in range(int((maxy - miny) / side_length) + 1):
+        moved_polygon = move_polygon(polygon, x * 100, y * 100)
+        demand = bike_sharing_demand_provider.get_demand_in_polygon(moved_polygon)
+        max_starts = max(max_starts, demand[0])
+        max_endings = max(max_endings, demand[1])
+        min_starts = min(min_starts, demand[0])
+        min_endings = min(min_endings, demand[1])
+
+print(f'max vag rad demand starts in 100x100m polygon: {max_starts}')
+print(f'max vag rad demand endings in 100x100m polygon: {max_endings}')
+print(f'min vag rad demand starts in 100x100m polygon: {min_starts}')
+print(f'min vag rad demand endings in 100x100m polygon: {min_endings}')
