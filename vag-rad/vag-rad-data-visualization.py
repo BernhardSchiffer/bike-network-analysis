@@ -54,20 +54,20 @@ plt.xlabel('Duration (min)')
 plt.xticks(range(0, 101, 5))
 plt.ylabel('Number of rentals')
 plt.grid()
-plt.show()
+plt.savefig('vag_rad_rental_durations.png', dpi=300)
 
 # %%
 # calculate straight-line distances between starting and finishing positions
 distances = df_all['distance_m']
 
 plt.figure(figsize=(10, 6))
-plt.hist(distances, bins=100, range=(0, 5000))
+plt.hist(distances, bins=100, range=(0, 5000), color='#0072B2')
 plt.title('Histogram of straight-line distances between starting and finishing positions')
 plt.xlabel('Distance (m)')
 plt.xticks(range(0, 5001, 250), rotation=45)
 plt.ylabel('Number of rentals')
 plt.grid()
-plt.show()
+plt.savefig('vag_rad_rental_distances.png', dpi=300)
 
 # get distances above 50 meters
 distances = distances[distances > 50]
@@ -208,6 +208,14 @@ print(f'Number of rentals that start outside the flexzone but end inside: {len(g
 print(f'Number of rentals that start and end outside the flexzone: {len(stay_outside_flexzone)} ({len(stay_outside_flexzone) / len(rides_in_nuremberg):.2%})')
 print(f'Total number of rentals that start and end in Nuremberg: {len(rides_in_nuremberg)}')
 
+ending_outside_flexzone = df_all[df_all['starting_in_nbg'] & df_all['finishing_in_nbg'] &~df_all['finishing_in_flexzone']]
+ending_outside_flexzone_not_at_station = ending_outside_flexzone[ending_outside_flexzone['Return place'].str.startswith('BIKE')]
+print(f'Number of rentals that end outside the flexzone and not at a station: {len(ending_outside_flexzone_not_at_station)} ({len(ending_outside_flexzone_not_at_station) / len(rides_in_nuremberg):.2%})')
+
+starting_outside_flexzone = df_all[df_all['starting_in_nbg'] & df_all['finishing_in_nbg'] &~df_all['starting_in_flexzone']]
+starting_outside_flexzone_not_at_station = starting_outside_flexzone[starting_outside_flexzone['Rental place'].str.startswith('BIKE')]
+print(f'Number of bikes picked up outside the free floating area but not at a station: {len(starting_outside_flexzone_not_at_station)} ({len(starting_outside_flexzone_not_at_station) / len(rides_in_nuremberg):.2%}). {len(starting_outside_flexzone_not_at_station) / len(ending_outside_flexzone_not_at_station):.2%} are therefor picked up before rebalancing operations.')
+
 # %%
 # plot starting and finishing positions
 gpd.GeoDataFrame(df_all['starting_position'], geometry='starting_position', crs='EPSG:4326').to_file('vag-rad-rentals.gpkg', layer='starting_positions', driver='GPKG')
@@ -339,3 +347,30 @@ print(f'max vag rad demand starts in 100x100m polygon: {max_starts}')
 print(f'max vag rad demand endings in 100x100m polygon: {max_endings}')
 print(f'min vag rad demand starts in 100x100m polygon: {min_starts}')
 print(f'min vag rad demand endings in 100x100m polygon: {min_endings}')
+
+# %%
+# get the number of unique bikes used in the year 2019
+rentals_2019 = df_all[df_all['Start time'].dt.year == 2019]
+
+bike_ids_start = rentals_2019[rentals_2019['Rental place'].str.startswith('BIKE')]['Rental place']
+bike_ids_end = rentals_2019[rentals_2019['Return place'].str.startswith('BIKE')]['Return place']
+
+unique_bike_ids = set()
+unique_bike_ids.update(bike_ids_start.values)
+unique_bike_ids.update(bike_ids_end.values)
+
+print(f'Number of unique bikes used in 2019: {len(unique_bike_ids)}')
+
+# %%
+# get the number of unique bikes used in the year 2024
+rentals_2024 = df_all[df_all['Start time'].dt.year == 2024]
+
+bike_ids_start = rentals_2024[rentals_2024['Rental place'].str.startswith('BIKE')]['Rental place']
+bike_ids_end = rentals_2024[rentals_2024['Return place'].str.startswith('BIKE')]['Return place']
+
+unique_bike_ids = set()
+unique_bike_ids.update(bike_ids_start.values)
+unique_bike_ids.update(bike_ids_end.values)
+
+print(f'Number of unique bikes used in 2024: {len(unique_bike_ids)}')
+# %%

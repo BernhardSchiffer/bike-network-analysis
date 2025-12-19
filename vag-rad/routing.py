@@ -1,31 +1,39 @@
 # %%
 # imports 
-import osmnx as ox
-import osmnx.distance
-import osmnx.routing
-import networkx as nx
+import os
+import pickle
+import time
+from collections import Counter
+
+import folium
+import geopandas as gpd
+import igraph as ig
+import leafmap.foliumap as leafmap
 import matplotlib
 import matplotlib.colors
 import matplotlib.pyplot as plt
-import psycopg2
-import os
-from dotenv import load_dotenv
-import folium
-import pandas as pd
-import geopandas as gpd
-from collections import Counter
-import time
-from utils.utils import *
-from utils.graph_types import *
-from utils.visualization_utils import plot_graph, plot_shifted_graph, plot_edge_betweenness_centrality
-import pickle
+import networkx as nx
 import numpy as np
-import igraph as ig
-import leafmap.foliumap as leafmap
-from tqdm import tqdm
+import osmnx as ox
+import osmnx.distance
+import osmnx.routing
+import pandas as pd
+import psycopg2
 import shapely
+from dotenv import load_dotenv
 from IPython.display import display
+from pyproj import Transformer
+from tqdm import tqdm
 
+from utils.graph_types import EdgeId, Route
+from utils.utils import correct_routes, get_reversed_key, route_to_edge_ids
+from utils.visualization_utils import (
+    plot_edge_betweenness_centrality,
+    plot_graph,
+    plot_shifted_graph,
+)
+
+# increase to parallelize route calculations
 CPU_COUNT = 1
 
 # %%
@@ -51,7 +59,7 @@ def plot_routes(routes: list[Route | None], graph: nx.MultiDiGraph, with_markers
     return map
 
 # calculate heat map for traveled edges
-def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, expanded: bool = False) -> GeoDataFrame:
+def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, expanded: bool = False) -> gpd.GeoDataFrame:
     cmap = plt.get_cmap('turbo')
     edges_counter = Counter()
 
@@ -406,7 +414,7 @@ for detour_factor, shortest_route, weighted_route in zip(detour_factors, shortes
         map = plot_routes([shortest_route, weighted_route], graph, with_markers=True)
         map.save(f'detour_factor_{detour_factor}.html')
 
-        if limit != None:
+        if limit is not None:
             count = count + 1
             if count >= limit:
                 break
@@ -477,8 +485,8 @@ plot_edge_betweenness_centrality(graph, ebc).to_file(filename='graph.gpkg', laye
 plot_edge_betweenness_centrality(graph, ebc, expanded=True).to_file(filename='graph.gpkg', layer='ebc_weight_expanded', driver='GPKG')
 # %%
 
-def plot_difference_between_edge_betweenness_and_route_count(graph: nx.MultiDiGraph, ebc: list[float], routes: list[EdgeId], expanded: bool = False) -> GeoDataFrame:
-    if type(graph) == nx.DiGraph:
+def plot_difference_between_edge_betweenness_and_route_count(graph: nx.MultiDiGraph, ebc: list[float], routes: list[EdgeId], expanded: bool = False) -> gpd.GeoDataFrame:
+    if type(graph) is nx.DiGraph:
         raise TypeError('The graph must be of type MultiDiGraph')
     cmap = plt.get_cmap('coolwarm')
 

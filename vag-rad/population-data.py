@@ -53,6 +53,16 @@ with pd.option_context('display.max_rows', None, 'display.max_columns', None):
     display(districts.sort_values(by='official_population', ascending=False))
 
 # %%
+tmp = districts[['district', 'official_population', 'nbg_district_proportion', 'ghsl_population_district', 'ghsl_district_proportion', 'nbg_ghsl_diff_proportion']]
+tmp['ghsl_population_district'] = tmp['ghsl_population_district'].round().astype('Int64')
+tmp['nbg_district_proportion'] = tmp['nbg_district_proportion'].round(2)
+tmp['ghsl_district_proportion'] = tmp['ghsl_district_proportion'].round(2)
+tmp['nbg_ghsl_diff_proportion'] = tmp['nbg_ghsl_diff_proportion'].round(2)
+
+with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+    display(tmp.sort_values(by='district', ascending=True))
+
+# %%
 # show median proportional difference
 print(f'Median proportional difference between official Nuremberg population and GHSL population per district: {abs(districts['nbg_ghsl_diff_proportion']).median():.2f}%')
 
