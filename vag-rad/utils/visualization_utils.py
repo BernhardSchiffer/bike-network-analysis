@@ -1,8 +1,11 @@
 from collections import Counter
+from typing import Callable
 
+import geopandas as gpd
 import matplotlib.colors
 import matplotlib.pyplot as plt
 import networkx as nx
+import numpy as np
 import shapely
 from geopandas import GeoDataFrame
 from pandas import DataFrame
@@ -111,11 +114,22 @@ def plot_graph(graph: nx.MultiDiGraph) -> tuple[GeoDataFrame, GeoDataFrame]:
     return edges_df, nodes_df
 
 
-def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], expanded: bool = False) -> DataFrame:
-    cmap = plt.get_cmap('turbo')
+type RenderOrderFunc = Callable[[float], float]
+
+def default_render_order_func(count):
+    return count
+
+# give higher difference values a higher render order
+def diff_render_order_func(count):
+    return abs(0.5 - count)
+
+def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], expanded: bool = False, cmap = plt.get_cmap('turbo'), normalize: bool = True, render_order_func: RenderOrderFunc = default_render_order_func) -> DataFrame:
+    return plot_edge_count(graph, ebc, expanded, cmap, normalize, render_order_func)
+
+def plot_edge_count(graph: nx.MultiDiGraph, ebc: list[float], expanded: bool = False, cmap = plt.get_cmap('turbo'), normalize: bool = True, render_order_func: RenderOrderFunc = default_render_order_func) -> DataFrame:
     edges_counter = Counter()
 
-    for edge, count in tqdm(zip(graph.edges, ebc), desc='count edges', unit='route'):
+    for edge, count in zip(graph.edges, ebc):
         edges_counter[edge] = count
 
     # collapse edges with same nodes ie. edges with different directions
@@ -128,7 +142,10 @@ def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], e
                 edges_counter.pop(reversed_edge)
         print(f'number of edges after collapsing: {len(edges_counter)}')
 
-    max_value = edges_counter.most_common(1)[0][1]
+    if normalize:
+        max_value = edges_counter.most_common(1)[0][1]
+    else:
+        max_value = 1.0
 
     if expanded:
         edges_df, _ = plot_shifted_graph(graph)
@@ -139,13 +156,15 @@ def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], e
     attributes = {
         'count': [], 
         'color': [], 
+        'transparency': [],
         'osmid': [], 
         'weight': [], 
         'length': [], 
         'penalty': [],
-        'slope': []
+        'slope': [],
+        'render_order': []
     }
-    for idx, _ in tqdm(edges_df.iterrows(), desc='add count to edges', unit='edge', total=len(edges_df)):
+    for idx, _ in edges_df.iterrows():
         try:
             count = edges_counter[idx]
             if count == 0:
@@ -161,7 +180,9 @@ def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], e
                     pass
             attributes['count'].append(count)
             color = matplotlib.colors.to_hex(cmap(count/max_value))
+            transparency = cmap(count/max_value)[3]
             attributes['color'].append(color)
+            attributes['transparency'].append(transparency)
             attributes['osmid'].append(graph.edges[idx].get('osmid', None))
             weight = graph.edges[idx].get('weight', None)
             attributes['weight'].append(weight)
@@ -170,6 +191,7 @@ def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], e
             penalty = graph.edges[idx].get('penalty', None)
             attributes['penalty'].append(penalty)
             attributes['slope'].append(graph.edges[idx].get('slope_percentage', None))
+            attributes['render_order'].append(render_order_func(count))
         except KeyError:
             to_remove_edges.append((s, d, k))
             continue
@@ -185,3 +207,34 @@ def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], e
     columns_to_keep.extend(list(attributes.keys()))
 
     return edges_df#.reset_index(drop=True)
+
+# read ebc from geopackage
+def get_ebc_values_from_gpkg(gpkg_filename: str, layer_name: str, graph: nx.MultiDiGraph) -> list[float]:
+    ebc_gdf = gpd.read_file(gpkg_filename, layer=layer_name)
+    # set index to u, v, key
+    ebc_gdf = ebc_gdf.set_index(['u', 'v', 'key'])
+    
+    ebc_values = []
+    for u, v, key in graph.edges(keys=True):
+        try:
+            ebc_value = ebc_gdf.loc[u, v, key]['count']
+            ebc_values.append(ebc_value)
+        except KeyError:
+            ebc_values.append(0.0)
+    return ebc_values
+
+# compare two ebc value lists
+def compare_ebc_values(ebc1: list[float], ebc2: list[float]) -> list[float]:
+    if len(ebc1) != len(ebc2):
+        raise ValueError('ebc1 and ebc2 must have the same length')
+    
+    # normalize both lists to [0, 1]
+    ebc1_norm = np.divide(ebc1, max(ebc1))
+    ebc2_norm = np.divide(ebc2, max(ebc2))
+
+    # bring differences to range [0, 1] with 0.5 as no difference
+    ebc_diff = np.subtract(ebc1_norm, ebc2_norm)
+    ebc_diff = np.add(ebc_diff, 1.0)
+    ebc_diff = np.divide(ebc_diff, 2.0)
+
+    return ebc_diff.tolist()

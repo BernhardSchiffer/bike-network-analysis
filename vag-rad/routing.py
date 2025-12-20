@@ -8,8 +8,6 @@ from collections import Counter
 import folium
 import geopandas as gpd
 import leafmap.foliumap as leafmap
-import matplotlib
-import matplotlib.colors
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -23,19 +21,20 @@ from dotenv import load_dotenv
 from IPython.display import display
 from tqdm import tqdm
 
-from utils.graph_types import EdgeId, Route
+from utils.graph_types import Route
 from utils.overpass_utils import fetch_city_polygon
 from utils.utils import (
     buffer_in_meters,
     correct_routes,
-    get_reversed_key,
     parse_junction_osmid,
     parse_old_edge_key,
     route_to_edge_ids,
 )
 from utils.visualization_utils import (
-    plot_graph,
-    plot_shifted_graph,
+    compare_ebc_values,
+    diff_render_order_func,
+    get_ebc_values_from_gpkg,
+    plot_edge_count,
 )
 
 # increase to parallelize route calculations
@@ -64,81 +63,25 @@ def plot_routes(routes: list[Route | None], graph: nx.MultiDiGraph, with_markers
     return map
 
 # calculate heat map for traveled edges
-def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, expanded: bool = True) -> gpd.GeoDataFrame:
-    cmap = plt.get_cmap('turbo')
+def get_edge_count(routes: list[Route | None], graph: nx.MultiDiGraph) -> list[float]:
     edges_counter = Counter()
+
+    # initialize all edges with 0
+    for edge in graph.edges(keys=True):
+        edges_counter[edge] = 0
 
     for route in tqdm(routes, desc='count edges', unit='route'):
         edges = route_to_edge_ids(route)
         edges_counter.update(edges)
-
-    # collapse edges with same nodes ie. edges with different directions
-    if not expanded:
-        print(f'number of edges: {len(edges_counter)}')
-        for edge in list(edges_counter.keys()):
-            reversed_edge = get_reversed_key(edge)
-            if reversed_edge in edges_counter:
-                edges_counter[edge] = edges_counter[edge] + edges_counter[reversed_edge]
-                edges_counter.pop(reversed_edge)
-        print(f'number of edges after collapsing: {len(edges_counter)}')
-
-    max_value = edges_counter.most_common(1)[0][1]
-
-    if expanded:
-        edges_df, _ = plot_shifted_graph(graph)
-    else:
-        edges_df, _ = plot_graph(graph)
-
-    to_remove_edges = []
-    attributes = {
-        'count': [], 
-        'color': [], 
-        'osmid': [], 
-        'weight': [], 
-        'length': [], 
-        'penalty': [],
-        'slope': []
-    }
-    for idx, _ in tqdm(edges_df.iterrows(), desc='add count to edges', unit='edge', total=len(edges_df)):
-        try:
-            count = edges_counter[idx]
-            if count == 0:
-                to_remove_edges.append(idx)
-                continue
-            if not expanded:
-                try:
-                    s, d, k = idx
-                    graph.edges[s, d, k]['turning_angle']
-                    to_remove_edges.append((s, d, k))
-                    continue
-                except KeyError:
-                    pass
-            attributes['count'].append(count)
-            color = matplotlib.colors.to_hex(cmap(count/max_value))
-            attributes['color'].append(color)
-            attributes['osmid'].append(graph.edges[idx].get('osmid', None))
-            weight = graph.edges[idx].get('weight', None)
-            attributes['weight'].append(weight)
-            length = graph.edges[idx].get('length', None)
-            attributes['length'].append(length)
-            penalty = graph.edges[idx].get('penalty', None)
-            attributes['penalty'].append(penalty)
-            attributes['slope'].append(graph.edges[idx].get('slope_percentage', None))
-        except KeyError:
-            to_remove_edges.append((s, d, k))
-            continue
-
-    # drop rows
-    edges_df = edges_df.drop(to_remove_edges)
-
-    # add column for count and add the counts list
-    for key, value in attributes.items():
-        edges_df[key] = value
-    # only keep columns that are needed
-    columns_to_keep = ['geometry', 'line_width']
-    columns_to_keep.extend(list(attributes.keys()))
     
-    return edges_df#.reset_index(drop=True)
+    count_values = []
+    for u, v, key in graph.edges(keys=True):
+        try:
+            count_value = edges_counter[(u, v, key)]
+            count_values.append(count_value)
+        except KeyError:
+            count_values.append(0.0)
+    return count_values
 
 #%%
 # Setup environment
@@ -171,25 +114,8 @@ edges = ox.graph_to_gdfs(graph, nodes=False)
 print(f'number of edges: {len(edges)}')
 print(f'length of network: {sum(edges["length"])} meters')
 
-# %%
-for u, v, key, data in graph.edges(data=True, keys=True):
-    if data.get('osmid', None) == (219246154, 31723299):
-        print(f'edge {u}-{v}-{key} has osmid {data.get("osmid", None)}')
-
-# %%
-edge_osmid_to_key_lookup = ox.graph_to_gdfs(graph, nodes=False, edges=True)
-edge_osmid_to_key_lookup['osmid'] = edge_osmid_to_key_lookup['osmid'].apply(lambda x: str(x))
-edge_osmid_to_key_lookup = edge_osmid_to_key_lookup.reset_index().set_index('osmid', drop=True)
-# Ensure it's a GeoDataFrame
-edge_osmid_to_key_lookup = gpd.GeoDataFrame(edge_osmid_to_key_lookup, geometry='geometry')
-
-edge_osmid_to_key_lookup
-
-#%%
-edge_osmid_to_key_lookup.loc['(219246154, 31723299)']
 # %% 
 # get rides of all bikes over time
-
 limit = 100000
 minimal_distance = 250
 max_distance = 20000
@@ -345,9 +271,11 @@ print(f'loaded {len(shortest_routes)} shortest routes from file')
 
 # %%
 # plot heatmap of calculated routes
-plot_heat_map_of_edges([ s for s in shortest_routes if correct_routes(s)], graph).to_file(filename='graph.gpkg', layer='shortest_path_usage', driver='GPKG')
+counts_values_shortest = get_edge_count([ s for s in shortest_routes if correct_routes(s)], graph)
+plot_edge_count(graph, counts_values_shortest, expanded=True, cmap=plt.get_cmap('turbo')).to_file(filename='graph.gpkg', layer='shortest_path_usage', driver='GPKG')
 
-plot_heat_map_of_edges([r for r in routes if correct_routes(r)], graph, expanded=False).to_file(filename='graph.gpkg', layer='weighted_path_usage', driver='GPKG')
+counts_values_weighted = get_edge_count([ r for r in routes if correct_routes(r)], graph)
+plot_edge_count(graph, counts_values_weighted, expanded=True, cmap=plt.get_cmap('turbo')).to_file(filename='graph.gpkg', layer='weighted_path_usage', driver='GPKG')
 
 # %%
 # plot histogram of route lengths of shortest routes
@@ -408,7 +336,7 @@ for route_length in route_lengths:
         length_groups['50000+'] += 1
 
 print('---')
-print('Route length distribution for weighted routes:')
+print('Route length distribution for shortest routes:')
 for group, count in length_groups.items():
     print(f'{group} meters: {count} routes ({count / len(route_lengths):.2%})')
 
@@ -422,11 +350,10 @@ for route in tqdm(routes, desc='calculate route lengths', unit='route'):
     route_length = sum([graph.edges[edge]['length'] for edge in r], 0)
     route_lengths.append(route_length)
 
-# %%
-print(f'average length of shortest routes: {np.average(route_lengths)} meters')
-print(f'median length of shortest routes: {np.median(route_lengths)} meters')
-print(f'max length of shortest routes: {max(route_lengths)} meters')
-print(f'min length of shortest routes: {min(route_lengths)} meters')
+print(f'average length of weighted routes: {np.average(route_lengths)} meters')
+print(f'median length of weighted routes: {np.median(route_lengths)} meters')
+print(f'max length of weighted routes: {max(route_lengths)} meters')
+print(f'min length of weighted routes: {min(route_lengths)} meters')
 print('---')
 
 print(f'75 percentile: {np.percentile(route_lengths, 75)}')
@@ -585,121 +512,17 @@ for detour_factor, shortest_route, weighted_route in zip(detour_factors, shortes
                 break
 
 # %%
-
-def plot_difference_between_edge_betweenness_and_route_count(graph: nx.MultiDiGraph, ebc: list[float], routes: list[EdgeId], expanded: bool = False) -> gpd.GeoDataFrame:
-    if type(graph) is nx.DiGraph:
-        raise TypeError('The graph must be of type MultiDiGraph')
-    cmap = plt.get_cmap('coolwarm')
-
-    ebc_counter = Counter()
-    for edge, count in zip(graph.edges, ebc):
-        ebc_counter[edge] = count
-
-    edges_counter = Counter()
-    for route in routes:
-        edges = route_to_edge_ids(route)
-        edges_counter.update(edges)
-
-    # collapse edges with same nodes ie. edges with different directions
-    if not expanded:
-        print(f'number of edges: {len(edges_counter)}')
-        for edge in list(edges_counter.keys()):
-            reversed_edge = get_reversed_key(edge)
-            if reversed_edge in edges_counter:
-                edges_counter[edge] = edges_counter[edge] + edges_counter[reversed_edge]
-                edges_counter.pop(reversed_edge)
-        print(f'number of edges after collapsing: {len(edges_counter)}')
-        print(f'number of edges: {len(ebc_counter)}')
-        for edge in list(ebc_counter.keys()):
-            reversed_edge = get_reversed_key(edge)
-            if reversed_edge in ebc_counter:
-                ebc_counter[edge] = ebc_counter[edge] + ebc_counter[reversed_edge]
-                ebc_counter.pop(reversed_edge)
-        print(f'number of edges after collapsing: {len(ebc_counter)}')
-
-    # normalize values
-    max_value = ebc_counter.most_common(1)[0][1]
-    for edge, count in ebc_counter.items():
-        ebc_counter[edge] = count / max_value
-
-    # normalize values
-    max_value = edges_counter.most_common(1)[0][1]
-    for edge, count in edges_counter.items():
-        edges_counter[edge] = count / max_value
-
-    if expanded:
-        edges_df, _, _ = plot_shifted_graph(graph)
-    else:
-        edges_df = plot_graph(graph)
-
-    to_remove_edges = []
-    attributes = {
-        'count_rwd': [],
-        'count_ebc': [],
-        'diff': [],
-        'color': [], 
-        'osmid': [], 
-        'weight': [], 
-        'length': [], 
-        'penalty': [],
-        'slope': []
-    }
-    for idx, _ in tqdm(edges_df.iterrows(), desc='add count to edges', unit='edge', total=len(edges_df)):
-        try:
-            count = edges_counter[idx]
-            count_ebc = ebc_counter[idx]
-            if count == 0 and count_ebc == 0:
-                to_remove_edges.append(idx)
-                continue
-            if not expanded:
-                try:
-                    s, d, k = idx
-                    graph.edges[s, d, k]['turning_angle']
-                    to_remove_edges.append((s, d, k))
-                    continue
-                except KeyError:
-                    pass
-            
-            attributes['count_rwd'].append(count)
-            attributes['count_ebc'].append(count_ebc)
-            # get difference between ebc and route count
-            diff = count_ebc - count
-            attributes['diff'].append(diff)
-            attributes['osmid'].append(graph.edges[idx].get('osmid', None))
-            weight = graph.edges[idx].get('weight', None)
-            attributes['weight'].append(weight)
-            length = graph.edges[idx].get('length', None)
-            attributes['length'].append(length)
-            penalty = graph.edges[idx].get('penalty', None)
-            attributes['penalty'].append(penalty)
-            attributes['slope'].append(graph.edges[idx].get('slope_percentage', None))
-        except KeyError:
-            to_remove_edges.append((s, d, k))
-            continue
-    
-    attributes['diff'] = np.interp(attributes['diff'], (min(attributes['diff']), max(attributes['diff'])), (0, +1))
-    for diff in attributes['diff']:
-        color = matplotlib.colors.to_hex(cmap(diff))
-        attributes['color'].append(color)
-
-    # drop rows
-    edges_df = edges_df.drop(to_remove_edges)
-
-    # add column for count and add the counts list
-    for key, value in attributes.items():
-        edges_df[key] = value
-    # only keep columns that are needed
-    columns_to_keep = ['geometry', 'line_width']
-    columns_to_keep.extend(list(attributes.keys()))
-
-    return edges_df#.reset_index(drop=True)
-
-# %%
 # load ebc values from file
-valid_routes = [r for r in routes if correct_routes(r)]
+ebc = get_ebc_values_from_gpkg('ebc.gpkg', 'ebc_area_normalization_bike_sharing', graph)
 
-plot_difference_between_edge_betweenness_and_route_count(graph, ebc, valid_routes).to_file(filename='graph.gpkg', layer='usage_diff', driver='GPKG')
+count_shortest_routes = get_ebc_values_from_gpkg('graph.gpkg', 'shortest_path_usage', graph)
+count_weighted_routes = get_ebc_values_from_gpkg('graph.gpkg', 'weighted_path_usage', graph)
 
-plot_difference_between_edge_betweenness_and_route_count(graph, ebc, valid_routes, expanded=True).to_file(filename='graph.gpkg', layer='usage_diff_expanded', driver='GPKG')
+diff_weighted_shortest_routes = compare_ebc_values(count_weighted_routes, count_shortest_routes)
+diff_ebc_weighted_routes = compare_ebc_values(ebc, count_weighted_routes)
+
+plot_edge_count(graph, diff_weighted_shortest_routes, expanded=True, cmap=plt.get_cmap('PiYG'), normalize=False, render_order_func=diff_render_order_func).to_file(filename='graph.gpkg', layer='diff_weighted_shortest', driver='GPKG')
+
+plot_edge_count(graph, diff_ebc_weighted_routes, expanded=True, cmap=plt.get_cmap('PiYG'), normalize=False, render_order_func=diff_render_order_func).to_file(filename='graph.gpkg', layer='diff_ebc_weighted', driver='GPKG')
 
 # %%
