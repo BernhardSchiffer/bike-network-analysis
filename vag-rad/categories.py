@@ -1,21 +1,24 @@
 # %% 
 # imports
+import os
+import pickle
+from collections import Counter
+
+import folium
+import leafmap.foliumap as leafmap
+import matplotlib.pyplot as plt
+import numpy as np
+import osmium
+import osmium.filter
 import osmnx as ox
 import pandas as pd
-import numpy as np
-import os
-import folium
-import osmium
-from utils.polygon_filter import PolygonFilter
-from utils.utils import *
-import pickle
-import leafmap.foliumap as leafmap
-from tqdm import tqdm
+from IPython.display import display
 from kmodes.kmodes import KModes
 from kmodes.kprototypes import KPrototypes
-import matplotlib.pyplot as plt
+from osmium.osm import WAY
 from tqdm import tqdm
-from collections import Counter
+
+from utils.polygon_filter import PolygonFilter
 
 # %%
 # load osm edge attributes from file
@@ -30,7 +33,7 @@ else:
 
     edges_in_nbg = []
 
-    for w in osmium.FileProcessor('mittelfranken-latest.osm.pbf').with_locations().with_filter(osmium.filter.EmptyTagFilter()).with_filter(osmium.filter.EntityFilter(osmium.osm.WAY)).with_filter(PolygonFilter(place.geometry[0])):
+    for w in osmium.FileProcessor('mittelfranken-latest.osm.pbf').with_locations().with_filter(osmium.filter.EmptyTagFilter()).with_filter(osmium.filter.EntityFilter(WAY)).with_filter(PolygonFilter(place.geometry[0])):
         obj = {}
         obj['osmid'] = w.id
         tags = {}
@@ -124,7 +127,12 @@ plt.grid()
 plt.show()
 
 # %%
-km_classifier = KModes(n_clusters=20, n_init=100, init='Huang', n_jobs=os.cpu_count()/2, verbose=1)
+n_cpus = os.cpu_count()
+if n_cpus is not None:
+    n_jobs = n_cpus / 2
+else:
+    n_jobs = 1
+km_classifier = KModes(n_clusters=20, n_init=100, init='Huang', n_jobs=int(n_jobs), verbose=1)
 km_classifier.fit(osm_edges_tmp.fillna(''))
 
 # save the model
@@ -176,7 +184,7 @@ def plot_clusters_on_map(graph, osm_edges, color_palette):
 plot_clusters_on_map(graph, osm_edges_tmp, ['red', 'blue', 'green', 'purple', 'orange', 'darkred', 'lightred', 'beige', 'darkblue', 'darkgreen', 'cadetblue', 'darkpurple', 'white', 'pink', 'lightblue'])
 
 # %%
-# remove last collumn
+# remove last column
 osm_edges_tmp = osm_edges_tmp.drop(columns=['cluster_20'])
 # %%
 # get gaps from file
@@ -257,7 +265,12 @@ plt.title('Cost of clustering for different number of clusters - k-modes')
 plt.grid()
 plt.show()
 # %%
-gap_km_classifier = KModes(n_clusters=20, n_init=100, init='Huang', n_jobs=os.cpu_count()/2, verbose=1)
+n_cpus = os.cpu_count()
+if n_cpus is not None:
+    n_jobs = n_cpus / 2
+else:
+    n_jobs = 1
+gap_km_classifier = KModes(n_clusters=20, n_init=100, init='Huang', n_jobs=int(n_jobs), verbose=1)
 gap_km_classifier.fit(osm_gap_attributes.fillna(''))
 # %%
 osm_gap_attributes['cluster_20'] = gap_km_classifier.predict(osm_gap_attributes.fillna(''))

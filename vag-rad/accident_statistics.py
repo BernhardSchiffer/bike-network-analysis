@@ -1,15 +1,16 @@
 # %%
 # imports
+import os
+
 import geopandas as gpd
-import pandas as pd
-import shapely
-import osmnx as ox
 import matplotlib.pyplot as plt
 import numpy as np
+import osmnx as ox
+import pandas as pd
+import shapely
 
 # %%
 # load every file in directory
-import os
 directory = 'accident_statistics'
 files = []
 for filename in os.listdir(directory):
@@ -161,7 +162,7 @@ def map_street_condition(n: int) -> str:
 def map_plausibility(n: int) -> str:
     plausibility = {
         1: 'Erfolgreiche Plausibilisierung des Unfallortes nach regulärem Verfahren',
-        1: 'Erfolgreiche Plausibilisierung des Unfallortes nach erweitertem Verfahren für Unfälle mit Fahrradbeteiligung'
+        2: 'Erfolgreiche Plausibilisierung des Unfallortes nach erweitertem Verfahren für Unfälle mit Fahrradbeteiligung'
     }
     return plausibility.get(n, 'Unbekannte Plausibilität')
 

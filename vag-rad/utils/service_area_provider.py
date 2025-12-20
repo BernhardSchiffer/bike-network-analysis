@@ -1,11 +1,14 @@
+import time
+
 import geopandas as gpd
+import networkx as nx
+import osmnx as ox
 import shapely
 from tqdm import tqdm
-import osmnx as ox
-import networkx as nx
-from utils.utils import get_unique_lines
+
 from utils.qgis_utils import get_network_coverage
-import time
+from utils.utils import get_unique_lines
+
 
 class ServiceAreaProvider():
     def __init__(self, coverage_distance: int, buffer_value: float, routing_graph: nx.MultiDiGraph):

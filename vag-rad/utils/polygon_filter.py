@@ -1,6 +1,7 @@
 # osmium filter that checks if node or one of way nodes is in polygon
 import shapely
 
+
 class PolygonFilter:
     def __init__(self, polygon):
         self.polygon = polygon

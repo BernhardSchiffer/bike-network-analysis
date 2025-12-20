@@ -1,14 +1,16 @@
 import os
 import subprocess
+
+import geopandas as gpd
 import networkx as nx
 import osmnx as ox
-import geopandas as gpd
+
 
 # call QGIS processing algorithm for network analysis
 def get_network_coverage(routing_graph: nx.MultiDiGraph, coverage_graph: nx.MultiDiGraph, travel_cost: int) -> gpd.GeoDataFrame:
     path_to_qgis_processing = '/Applications/QGIS.app/Contents/MacOS/bin/qgis_process'
     geopackage_file = 'tmp.gpkg'
-    result_file = 'bike_path_coverage.gpkg'
+    result_file = 'qgis_result.gpkg'
 
     ox.graph_to_gdfs(routing_graph, nodes=False, edges=True).to_file(geopackage_file, layer='routing_graph', driver='GPKG')
     ox.graph_to_gdfs(coverage_graph, nodes=True, edges=False).drop(columns=['osmid']).to_file(geopackage_file, layer='starting_points', driver='GPKG')

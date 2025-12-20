@@ -1,13 +1,15 @@
 import geopandas as gpd
 import networkx as nx
 import osmnx as ox
-import shapely
-from utils.population_provider import PopulationProvider
-from utils.service_area_provider import ServiceAreaProvider
 import pyproj
+import shapely
 from shapely.ops import transform
 from tqdm import tqdm
+
 from utils.graph_types import NodeId
+from utils.population_provider import PopulationProvider
+from utils.service_area_provider import ServiceAreaProvider
+
 
 class GapEvaluator:
     def __init__(self, population_provider: PopulationProvider, service_area_provider: ServiceAreaProvider, osmids_with_bike_infra: set[int], osmids_with_protected_bike_infra: set[int]):

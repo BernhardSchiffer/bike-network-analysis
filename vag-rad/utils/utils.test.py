@@ -1,9 +1,9 @@
 # %%
-from utils.utils import *
+from utils.utils import get_reversed_key, is_sublist, is_tuple, split_tuple
 
 # test tuple validation
 t = '(1, 2)'
-assert is_tuple(t) == True
+assert is_tuple(t)
 
 # test split tuplestring
 s = '1360463310, (1360463310, 1360463309), 0'
@@ -19,5 +19,5 @@ assert get_reversed_key(k1) == k2, f'expected {k2} but got {get_reversed_key(k1)
 a = [5, 6, 3, 8, 2, 1, 7, 1]
 b = [8, 2, 1, 7] # sublist
 
-assert is_sublist(a, b) == True
+assert is_sublist(a, b)
 # %%

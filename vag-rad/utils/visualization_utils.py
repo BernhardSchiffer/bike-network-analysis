@@ -9,7 +9,6 @@ import numpy as np
 import shapely
 from geopandas import GeoDataFrame
 from pandas import DataFrame
-from tqdm import tqdm
 
 from utils.utils import get_reversed_key
 

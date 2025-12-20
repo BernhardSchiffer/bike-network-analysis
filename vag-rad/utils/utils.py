@@ -17,7 +17,7 @@ from pyproj import CRS, Geod, Transformer
 from shapely.ops import transform
 from tqdm import tqdm
 
-from utils.graph_types import *
+from utils.graph_types import EdgeId, NodeId, Route
 
 
 # calculate length of edges of a graph

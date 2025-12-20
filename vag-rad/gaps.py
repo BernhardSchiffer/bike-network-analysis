@@ -1,27 +1,36 @@
 # %%
 # imports
-import osmnx as ox
-import osmnx.settings
-import networkx as nx
+import pickle
+import time
+from collections import Counter
+
+import geopandas as gpd
+import igraph as ig
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
-from tqdm import tqdm
-from collections import Counter
-from  utils.graph_types import *
-from utils.utils import *
-import pickle
-import igraph as ig
-import time
-import shapely
+import networkx as nx
+import osmnx as ox
+import osmnx.settings
 import pandas as pd
+import shapely
 from geopandas import GeoDataFrame
-from utils.graph_builder import get_turn_direction
-from utils.visualization_utils import plot_graph, plot_shifted_graph
-from utils.graph_types import TurnDirection, LEFT, STRAIGHT, RIGHT, U_TURN
-import geopandas as gpd
+from tqdm import tqdm
+
 from utils.gap_evaluator import GapEvaluator
+from utils.graph_builder import get_turn_direction
+from utils.graph_types import LEFT, RIGHT, STRAIGHT, U_TURN, EdgeId, NodeId, Route
 from utils.population_provider import GHSLPopulationProvider
 from utils.service_area_provider import ServiceAreaProvider
+from utils.utils import (
+    correct_routes,
+    get_reversed_key,
+    is_sublist,
+    parse_junction_osmid,
+    parse_old_edge_key,
+    route_to_edge_ids,
+)
+from utils.visualization_utils import plot_graph, plot_shifted_graph
+
 
 #%%
 # join all values to a singe list

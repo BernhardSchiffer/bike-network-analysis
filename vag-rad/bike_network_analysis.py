@@ -1,28 +1,35 @@
 # %% 
 # imports
-import osmnx as ox
-from osmnx.simplification import simplify_graph
-import networkx as nx
+import datetime
+from collections import Counter
+
 import folium
+import geopandas as gpd
 import matplotlib
 import matplotlib.colors
-from matplotlib.cm import get_cmap
 import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
 import osmium
+import osmnx as ox
+from IPython.display import display
+from matplotlib.cm import get_cmap
 from osmium import FileProcessor
-from osmium.filter import EntityFilter, EmptyTagFilter
+from osmium.filter import EmptyTagFilter, EntityFilter
 from osmium.osm import WAY
-from collections import Counter
-import geopandas as gpd
+from osmnx.simplification import simplify_graph
 from shapely import LineString
 from tqdm import tqdm
-from utils.graph_builder import GraphBuilder
-from utils.polygon_filter import PolygonFilter
-from utils.utils import *
+
+from utils.graph_builder import GraphBuilder, route_choice_model_1
 from utils.overpass_utils import fetch_city_polygon
-from IPython.display import display
-from utils.population_provider import NurenbergDistrictPopulationProvider, GHSLPopulationProvider
+from utils.polygon_filter import PolygonFilter
+from utils.population_provider import (
+    GHSLPopulationProvider,
+    NurenbergDistrictPopulationProvider,
+)
 from utils.service_area_provider import ServiceAreaProvider
+from utils.utils import get_path_length
 
 # %% 
 # evaluation of osm features in Nürnberg
@@ -117,7 +124,7 @@ for u, v, key, data in routing_graph.edges(data=True, keys=True):
 print('number of edges in bikeable graph after simplifying:', len(routing_graph.edges))
 
 # set node and edge attributes
-graph_builder = GraphBuilder(query_polygon)
+graph_builder = GraphBuilder(query_polygon, route_choice_model_1)
 
 # add paths where the street is oneway but bikes are allowed in both directions
 edge_count_before = len(routing_graph.edges)
@@ -178,7 +185,6 @@ ox.graph_to_gdfs(bicycle_infrastructure_graph, nodes=True, edges=False).drop(col
 ox.graph_to_gdfs(bicycle_infrastructure_graph, nodes=False, edges=True).to_file('graph.gpkg', layer='bicycle_infrastructure', driver='GPKG')
 
 # %%
-import datetime
 # get utc timestamp in iso format
 current_timestamp = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(timespec='seconds') + 'Z'
 # %%
@@ -292,7 +298,7 @@ protected_bike_infra_coverage
 nbg_place = ox.geocode_to_gdf('Nürnberg')
 nbg_polygon = nbg_place['geometry'].values[0]
 
-population_provider = GHSLPopulationProvider()
+population_provider = NurenbergDistrictPopulationProvider()
 
 nbg_total_population = population_provider.get_population_in_polygon(nbg_polygon)
 

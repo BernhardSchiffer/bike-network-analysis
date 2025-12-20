@@ -1,12 +1,15 @@
 # define abstract class for population providers
 from abc import ABC, abstractmethod
-import shapely
-import rasterio
+
 import geopandas as gpd
 import overpy
+import rasterio
+import shapely
 from tqdm import tqdm
-from utils.overpass_utils import get_polygon_from_result, fetch_city_polygon
+
 from utils.demand_provider import DemandProvider
+from utils.overpass_utils import fetch_city_polygon, get_polygon_from_result
+
 
 class PopulationProvider(ABC):
     @abstractmethod
@@ -53,9 +56,10 @@ class GHSLPopulationProvider(PopulationProvider, DemandProvider):
         row, col = self.population_src.index(point.x, point.y)
         return self.population_data[row, col]
     
-    def get_demand_at_point(self, point: shapely.Point) -> float:
+    def get_demand_at_point(self, point: shapely.Point) -> tuple[float, float]:
         # for GHSL, we assume demand is proportional to the population
-        return self.get_population_at_point(point)
+        population = self.get_population_at_point(point)
+        return (population, population)
 
 class NurenbergDistrictPopulationProvider(PopulationProvider):
     def __init__(self, from_cache: bool = True):

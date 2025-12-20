@@ -9,7 +9,7 @@ from utils.utils import buffer_in_meters
 
 class DemandProvider(ABC):
     @abstractmethod
-    def get_demand_at_point(self, point: shapely.Point) -> float:
+    def get_demand_at_point(self, point: shapely.Point) -> tuple[float, float]:
         pass
 
 class VagRadDemandProvider(DemandProvider):
