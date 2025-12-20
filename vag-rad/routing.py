@@ -7,7 +7,6 @@ from collections import Counter
 
 import folium
 import geopandas as gpd
-import igraph as ig
 import leafmap.foliumap as leafmap
 import matplotlib
 import matplotlib.colors
@@ -22,19 +21,25 @@ import psycopg2
 import shapely
 from dotenv import load_dotenv
 from IPython.display import display
-from pyproj import Transformer
 from tqdm import tqdm
 
 from utils.graph_types import EdgeId, Route
-from utils.utils import correct_routes, get_reversed_key, route_to_edge_ids, parse_junction_osmid, parse_old_edge_key
+from utils.overpass_utils import fetch_city_polygon
+from utils.utils import (
+    buffer_in_meters,
+    correct_routes,
+    get_reversed_key,
+    parse_junction_osmid,
+    parse_old_edge_key,
+    route_to_edge_ids,
+)
 from utils.visualization_utils import (
-    plot_edge_betweenness_centrality,
     plot_graph,
     plot_shifted_graph,
 )
 
 # increase to parallelize route calculations
-CPU_COUNT = 8
+CPU_COUNT = 1
 
 # %%
 # helper functions
@@ -59,7 +64,7 @@ def plot_routes(routes: list[Route | None], graph: nx.MultiDiGraph, with_markers
     return map
 
 # calculate heat map for traveled edges
-def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, expanded: bool = False) -> gpd.GeoDataFrame:
+def plot_heat_map_of_edges(routes: list[Route | None], graph: nx.MultiDiGraph, expanded: bool = True) -> gpd.GeoDataFrame:
     cmap = plt.get_cmap('turbo')
     edges_counter = Counter()
 
@@ -236,6 +241,19 @@ df['starting_position'] = shapely.from_wkt(df['starting_position'])
 df['finishing_position'] = shapely.from_wkt(df['finishing_position'])
 
 df = gpd.GeoDataFrame(df, geometry='starting_position', crs='EPSG:4326')
+
+# filter out trips that begin or end outside of the graph area
+place_name = 'Nürnberg'
+nbg_area = fetch_city_polygon(place_name)
+
+graph_polygon = buffer_in_meters(nbg_area, 5000)
+
+starting_positions_in_graph: list = gpd.GeoSeries(df['starting_position'], crs='EPSG:4326').sindex.query(graph_polygon, predicate='contains')
+finishing_positions_in_graph: list = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').sindex.query(graph_polygon, predicate='contains')
+
+valid_indices = set(starting_positions_in_graph).intersection(set(finishing_positions_in_graph))
+df = df.iloc[list(valid_indices)].reset_index(drop=True)
+
 df
 
 # %%
@@ -272,9 +290,6 @@ for i in range(0, len(df), chunk_size):
     file.close()
 
 # %%
-plot_heat_map_of_edges([ s for s in shortest_routes if correct_routes(s)], graph).save('shortest_routes.html')
-
-# %%
 chunk_size = 100000
 for i in range(0, len(df), chunk_size):
     # calculate trips based on the new weight metric based on osm features
@@ -308,21 +323,6 @@ for i in range(0, len(df), chunk_size):
     file.close()
 
 # %%
-# plot heatmap of calculated routes
-valid_routes = [r for r in routes if correct_routes(r)]
-
-routes_edge_ids = []
-for route in tqdm(valid_routes, desc='convert routes to edge ids', unit='route'):
-    edges = route_to_edge_ids(route)
-    routes_edge_ids.append(edges)
-
-# %%
-
-plot_heat_map_of_edges(valid_routes, graph, expanded=False).to_file(filename='graph.gpkg', layer='path_usage', driver='GPKG')
-
-plot_heat_map_of_edges(valid_routes, graph, expanded=True).to_file(filename='graph.gpkg', layer='path_usage_expanded', driver='GPKG')
-
-# %%
 # load calculated routes from file
 routes = []
 with open('calculated_routes.pickle', 'rb') as f:
@@ -342,6 +342,169 @@ with open('calculated_shortest_routes.pickle', 'rb') as f:
         except EOFError:
             break
 print(f'loaded {len(shortest_routes)} shortest routes from file')
+
+# %%
+# plot heatmap of calculated routes
+plot_heat_map_of_edges([ s for s in shortest_routes if correct_routes(s)], graph).to_file(filename='graph.gpkg', layer='shortest_path_usage', driver='GPKG')
+
+plot_heat_map_of_edges([r for r in routes if correct_routes(r)], graph, expanded=False).to_file(filename='graph.gpkg', layer='weighted_path_usage', driver='GPKG')
+
+# %%
+# plot histogram of route lengths of shortest routes
+route_lengths = []
+for route in tqdm(shortest_routes, desc='calculate route lengths', unit='route'):
+    if not correct_routes(route):
+        continue
+    r = route_to_edge_ids(route)
+    route_length = sum([graph.edges[edge]['length'] for edge in r], 0)
+    route_lengths.append(route_length)
+
+print(f'average length of shortest routes: {np.average(route_lengths)} meters')
+print(f'median length of shortest routes: {np.median(route_lengths)} meters')
+print(f'max length of shortest routes: {max(route_lengths)} meters')
+print(f'min length of shortest routes: {min(route_lengths)} meters')
+print('---')
+
+print(f'75 percentile: {np.percentile(route_lengths, 75)}')
+print(f'85 percentile: {np.percentile(route_lengths, 85)}')
+print(f'95 percentile: {np.percentile(route_lengths, 95)}')
+print(f'99 percentile: {np.percentile(route_lengths, 99)}')
+
+# get bins for every 50 meters
+max_distance = 10000
+distance_step = 50
+bins = np.arange(0, max_distance + distance_step, distance_step)
+
+# show histogram of route lengths shorter than 5000 meters
+plt.figure(figsize=(10, 6))
+plt.hist([l for l in route_lengths if l < max_distance], bins=bins, color='#0072B2')
+plt.title('Histogram of Shortest Route Lengths for VAG-Rad Rentals')
+plt.xlabel('Route Length (meters)')
+plt.ylabel('Number of Rentals')
+plt.xticks(range(0, 10001, 500), rotation=45)
+plt.yticks(range(0, 90001, 10000))
+plt.grid()
+plt.savefig('shortest_route_lengths_histogram.png', dpi=300)
+
+# group routes by length
+length_groups = {'0-500': 0, '500-1000': 0, '1000-2000': 0, '2000-5000': 0, '5000-10000': 0, '10000-20000': 0, '20000-50000': 0, '50000+': 0}
+
+for route_length in route_lengths:
+    if route_length < 500:
+        length_groups['0-500'] += 1
+    elif route_length < 1000:
+        length_groups['500-1000'] += 1
+    elif route_length < 2000:
+        length_groups['1000-2000'] += 1
+    elif route_length < 5000:
+        length_groups['2000-5000'] += 1
+    elif route_length < 10000:
+        length_groups['5000-10000'] += 1
+    elif route_length < 20000:
+        length_groups['10000-20000'] += 1
+    elif route_length < 50000:
+        length_groups['20000-50000'] += 1
+    else:
+        length_groups['50000+'] += 1
+
+print('---')
+print('Route length distribution for weighted routes:')
+for group, count in length_groups.items():
+    print(f'{group} meters: {count} routes ({count / len(route_lengths):.2%})')
+
+# %%
+# plot histogram of route lengths of weighted routes
+route_lengths = []
+for route in tqdm(routes, desc='calculate route lengths', unit='route'):
+    if not correct_routes(route):
+        continue
+    r = route_to_edge_ids(route)
+    route_length = sum([graph.edges[edge]['length'] for edge in r], 0)
+    route_lengths.append(route_length)
+
+# %%
+print(f'average length of shortest routes: {np.average(route_lengths)} meters')
+print(f'median length of shortest routes: {np.median(route_lengths)} meters')
+print(f'max length of shortest routes: {max(route_lengths)} meters')
+print(f'min length of shortest routes: {min(route_lengths)} meters')
+print('---')
+
+print(f'75 percentile: {np.percentile(route_lengths, 75)}')
+print(f'85 percentile: {np.percentile(route_lengths, 85)}')
+print(f'95 percentile: {np.percentile(route_lengths, 95)}')
+print(f'99 percentile: {np.percentile(route_lengths, 99)}')
+
+# get bins for every 50 meters
+max_distance = 10000
+distance_step = 50
+bins = np.arange(0, max_distance + distance_step, distance_step)
+
+# show histogram of route lengths shorter than 5000 meters
+plt.figure(figsize=(10, 6))
+plt.hist([l for l in route_lengths if l < max_distance], bins=bins, color='#0072B2')
+plt.title('Histogram of Route Lengths for VAG-Rad Rentals with Route Choice Model')
+plt.xlabel('Route Length (meters)')
+plt.ylabel('Number of Rentals')
+plt.xticks(range(0, 10001, 500), rotation=45)
+plt.yticks(range(0, 90001, 10000))
+plt.grid()
+plt.savefig('weighted_route_lengths_histogram.png', dpi=300)
+
+# group routes by length
+length_groups = {'0-500': 0, '500-1000': 0, '1000-2000': 0, '2000-5000': 0, '5000-10000': 0, '10000-20000': 0, '20000-50000': 0, '50000+': 0}
+
+for route_length in route_lengths:
+    if route_length < 500:
+        length_groups['0-500'] += 1
+    elif route_length < 1000:
+        length_groups['500-1000'] += 1
+    elif route_length < 2000:
+        length_groups['1000-2000'] += 1
+    elif route_length < 5000:
+        length_groups['2000-5000'] += 1
+    elif route_length < 10000:
+        length_groups['5000-10000'] += 1
+    elif route_length < 20000:
+        length_groups['10000-20000'] += 1
+    elif route_length < 50000:
+        length_groups['20000-50000'] += 1
+    else:
+        length_groups['50000+'] += 1
+
+print('---')
+print('Route length distribution for weighted routes:')
+for group, count in length_groups.items():
+    print(f'{group} meters: {count} routes ({count / len(route_lengths):.2%})')
+
+# %%
+def get_route_geometry(route: Route, graph: nx.MultiDiGraph) -> shapely.LineString:
+    edge_geometries = []
+    edges = route_to_edge_ids(route)
+    for edge in edges:
+        edge_data = graph.edges[edge]
+        geom = edge_data.get('shifted_geometry', None)
+        if geom is None:
+            raise ValueError(f'Edge {edge} has no shifted_geometry')
+        edge_geometries.append(geom)
+    # combine all edge geometries into one linestring
+    route_geometry = shapely.ops.linemerge(edge_geometries)
+    return route_geometry
+
+# show routes that are longer than 20 km
+route_geometries = []
+for idx, route in enumerate(routes):
+    if not correct_routes(route):
+        continue
+    r = route_to_edge_ids(route)
+    route_length = sum([graph.edges[edge]['length'] for edge in r])
+    if route_length > 18000 and route_length < 25000:
+        route_geometry = get_route_geometry(route, graph)
+        route_geometries.append(route_geometry)
+        if len(route_geometries) >= 10:
+            break
+
+for idx, tmp in enumerate(route_geometries):
+    gpd.GeoDataFrame({'geometry': [tmp]}, geometry='geometry', crs='EPSG:4326').to_file(filename='long_routes.gpkg', layer=f'route_{idx}', driver='GPKG')
 # %%
 routes = {idx: r for idx, r in enumerate(routes)}
 shortest_routes = {idx: r for idx, r in enumerate(shortest_routes)}
@@ -376,24 +539,18 @@ for route in tqdm(routes, desc='calculate length of weighted routes', unit='rout
     route_length = sum([graph.edges[edge]['length'] for edge in r])
     weighted_route_lengths.append(route_length)
 
+# %%
+# remove routes with zero length
+valid_indices = [i for i, l in enumerate(shortest_route_lengths) if l > 0 and weighted_route_lengths[i] > 0]
+shortest_route_lengths = [shortest_route_lengths[i] for i in valid_indices]
+weighted_route_lengths = [weighted_route_lengths[i] for i in valid_indices]
+
 # calculate detour factor of routes
 detour_factors = []
 for s_length, w_length in zip(shortest_route_lengths, weighted_route_lengths):
     detour_factor = w_length / s_length
     detour_factors.append(detour_factor)
 # %%
-print(f'average length of shortest routes: {np.average(shortest_route_lengths)} meters')
-print(f'median length of shortest routes: {np.median(shortest_route_lengths)} meters')
-print(f'max length of shortest routes: {max(shortest_route_lengths)} meters')
-print(f'min length of shortest routes: {min(shortest_route_lengths)} meters')
-print('---')
-
-print(f'average length of weighted routes: {np.average(weighted_route_lengths)} meters')
-print(f'median length of weighted routes: {np.median(weighted_route_lengths)} meters')
-print(f'max length of weighted routes: {max(weighted_route_lengths)} meters')
-print(f'min length of weighted routes: {min(weighted_route_lengths)} meters')
-print('---')
-
 avg_detour_factor = np.average(detour_factors)
 median_detour_factor = np.median(detour_factors)
 
@@ -404,8 +561,6 @@ print(f'85 percentile: {np.percentile(detour_factors, 85)}')
 print(f'95 percentile: {np.percentile(detour_factors, 95)}')
 print(f'99 percentile: {np.percentile(detour_factors, 99)}')
 
-# %%
-plt.boxplot(detour_factors)
 # %%
 max_value = max(detour_factors)
 idx_max_value = detour_factors.index(max_value)
@@ -429,70 +584,6 @@ for detour_factor, shortest_route, weighted_route in zip(detour_factors, shortes
             if count >= limit:
                 break
 
-#%%
-wg: ig.Graph = ig.Graph.from_networkx(graph)
-# calculate betweenness centrality of all edges in graph
-upper_bound = 4500
-lower_bound = 1000
-count = 0
-ebc = [0]
-intersection_nodes = [n for n in wg.vs if n['_nx_name'] != n['osmid']]
-intersection_osmids = set([n['osmid'] for n in intersection_nodes])
-
-# get intersection nodes whom osmid is not already in the list
-nodes = []
-for node in intersection_nodes:
-    if node['osmid'] in intersection_osmids:
-        nodes.append(node)
-        intersection_osmids.remove(node['osmid'])
-
-# for every node
-for node in tqdm(nodes, desc='calculate edge betweenness centrality', unit='node'):
-    # get every node within certain range
-    #start_ego = time.time()
-    distances = wg.distances(source=node, target=intersection_nodes, weights='length')
-    dest_nodes = [i for i, d in enumerate(distances[0]) if d < upper_bound and d > lower_bound]
-    #end_ego = time.time()
-    #print(f'calculated ego graph in {end_ego - start_ego} seconds')
-
-    dest_nodes = [intersection_nodes[i] for i in dest_nodes]
-
-    #start_ebc = time.time()
-    ebc_tmp = wg.edge_betweenness(sources=[node], targets=dest_nodes, directed=True, weights="weight")
-    #end_ebc = time.time()
-    #print(f'calculated edge betweenness centrality in {end_ebc - start_ebc} seconds')
-
-    # update ebc counter
-    #ebc_update_start = time.time()
-    ebc = np.add(ebc, ebc_tmp)
-    #ebc_update_end = time.time()
-    #print(f'updated ebc counter in {ebc_update_end - ebc_update_start} seconds')
-
-    count = count + 1
-    if count >= len(nodes):
-        break
-
-# %%
-# save ebc values to file
-with open('ebc_1000_4500.pickle', 'wb') as f:
-    pickle.dump(ebc, f)
-
-# %%
-plot_edge_betweenness_centrality(graph, ebc).to_file(filename='graph.gpkg', layer='ebc_weight_1000_4500', driver='GPKG')
-
-plot_edge_betweenness_centrality(graph, ebc, expanded=True).to_file(filename='graph.gpkg', layer='ebc_weight_1000_4500_expanded', driver='GPKG')
-
-# %%
-wg: ig.Graph = ig.Graph.from_networkx(graph)
-ebc_start = time.time()
-ebc = wg.edge_betweenness(directed=True, cutoff=4500, weights="weight")
-ebc_end = time.time()
-print(f'calculated edge betweenness centrality in {ebc_end - ebc_start} seconds')
-
-# %%
-plot_edge_betweenness_centrality(graph, ebc).to_file(filename='graph.gpkg', layer='ebc_weight', driver='GPKG')
-
-plot_edge_betweenness_centrality(graph, ebc, expanded=True).to_file(filename='graph.gpkg', layer='ebc_weight_expanded', driver='GPKG')
 # %%
 
 def plot_difference_between_edge_betweenness_and_route_count(graph: nx.MultiDiGraph, ebc: list[float], routes: list[EdgeId], expanded: bool = False) -> gpd.GeoDataFrame:
@@ -603,24 +694,12 @@ def plot_difference_between_edge_betweenness_and_route_count(graph: nx.MultiDiGr
 
     return edges_df#.reset_index(drop=True)
 
+# %%
+# load ebc values from file
 valid_routes = [r for r in routes if correct_routes(r)]
 
 plot_difference_between_edge_betweenness_and_route_count(graph, ebc, valid_routes).to_file(filename='graph.gpkg', layer='usage_diff', driver='GPKG')
 
 plot_difference_between_edge_betweenness_and_route_count(graph, ebc, valid_routes, expanded=True).to_file(filename='graph.gpkg', layer='usage_diff_expanded', driver='GPKG')
-
-# %%
-def trasform_coordinates(coords: list[float], transformer: Transformer) -> list[float]:
-    return [transformer.transform(coord[0], coord[1]) for coord in coords]
-
-osm_to_gk = Transformer.from_crs("EPSG:4326", "EPSG:31468")
-gk_to_osm = Transformer.from_crs("EPSG:31468", "EPSG:4326")
-
-line: shapely.LineString = graph.edges[27361796, (27361796, 2179910417)]['geometry']
-print(line)
-line = shapely.LineString(trasform_coordinates(list(line.coords), osm_to_gk))
-print(line)
-line = line.parallel_offset(1, side='right', resolution=1)
-print(line)
 
 # %%
