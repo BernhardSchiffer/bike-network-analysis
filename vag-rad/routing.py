@@ -26,7 +26,7 @@ from pyproj import Transformer
 from tqdm import tqdm
 
 from utils.graph_types import EdgeId, Route
-from utils.utils import correct_routes, get_reversed_key, route_to_edge_ids
+from utils.utils import correct_routes, get_reversed_key, route_to_edge_ids, parse_junction_osmid, parse_old_edge_key
 from utils.visualization_utils import (
     plot_edge_betweenness_centrality,
     plot_graph,
@@ -34,7 +34,7 @@ from utils.visualization_utils import (
 )
 
 # increase to parallelize route calculations
-CPU_COUNT = 1
+CPU_COUNT = 8
 
 # %%
 # helper functions
@@ -147,7 +147,17 @@ POSTGRES_PORT = os.getenv('POSTGRES_PORT')
 
 # %% 
 # load weighted graph from file
-graph = ox.load_graphml('simplified_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float, 'shifted_geometry': lambda x: shapely.from_wkt(x), 'osmid': parse_junction_osmid, 'penalty': float, 'slope_percentage': float, 'length': float, 'old_edge_key': parse_old_edge_key})
+graph = ox.load_graphml('simplified_bicycle_graph.graphml', 
+                        node_dtypes={'osmid': str}, 
+                        edge_dtypes={
+                            'weight': float, 
+                            'shifted_geometry': lambda x: shapely.from_wkt(x), 
+                            'osmid': parse_junction_osmid, 
+                            'penalty': float, 
+                            'slope_percentage': float, 
+                            'length': float, 
+                            'old_edge_key': parse_old_edge_key
+                            })
 
 # some statistics of the graph
 nodes = ox.graph_to_gdfs(graph, nodes=True, edges=False, node_geometry=True, fill_edge_geometry=False)
@@ -220,7 +230,7 @@ conn.close()
 
 # %%
 # load all rentals from file
-df = pd.read_csv('vag-rad-data/processed/All_Filtered_Ausleihen_Kundendetails.csv')
+df = pd.read_csv('vag-rad-data/processed/All_Ausleihen_Kundendetails.csv')
 
 df['starting_position'] = shapely.from_wkt(df['starting_position'])
 df['finishing_position'] = shapely.from_wkt(df['finishing_position'])
