@@ -12,6 +12,7 @@ import networkx as nx
 import numpy as np
 import osmium
 import osmnx as ox
+import osmnx.settings
 from IPython.display import display
 from matplotlib.cm import get_cmap
 from osmium import FileProcessor
@@ -82,7 +83,7 @@ sorted(bicycle_stats.most_common(len(bicycle_stats)))
 place_name = 'Nürnberg'
 query_polygon = fetch_city_polygon(place_name)
 # use specific overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-13T20:21:02Z"]{maxsize}'
+osmnx.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-21T20:21:22Z"]{maxsize}'
 
 bikeable_ways = (
         '["highway"]["area"!~"yes"]["access"!~"private"]'
@@ -190,7 +191,7 @@ current_timestamp = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=
 # %%
 place_name = 'Nürnberg'
 # use specific overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-13T20:21:02Z"]{maxsize}'
+osmnx.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-21T20:21:22Z"]{maxsize}'
 
 filters = {
     'cycleway_lane': '["cycleway"="lane"]',

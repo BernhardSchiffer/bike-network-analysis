@@ -2,6 +2,7 @@
 # imports
 import networkx as nx
 import osmnx as ox
+import osmnx.settings
 import shapely
 from tqdm import tqdm
 
@@ -29,7 +30,7 @@ query_polygon = buffer_in_meters(nbg_area, 5000)
 #query_polygon = shapely.box(*bbox)
 
 # use specific overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-21T20:21:22Z"]{maxsize}'
+osmnx.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-21T20:21:22Z"]{maxsize}'
 
 bikeable_ways = (
         '["highway"]["area"!~"yes"]["access"!~"private"]'
@@ -131,7 +132,7 @@ nbg_area = fetch_city_polygon(place_name)
 query_polygon = buffer_in_meters(nbg_area, 5000)
 
 # use specific overpass settings
-ox.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-21T20:21:22Z"]{maxsize}'
+osmnx.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-21T20:21:22Z"]{maxsize}'
 
 bikeable_ways = (
         '["highway"]["area"!~"yes"]["access"!~"private"]'

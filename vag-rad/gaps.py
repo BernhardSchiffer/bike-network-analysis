@@ -29,7 +29,11 @@ from utils.utils import (
     parse_old_edge_key,
     route_to_edge_ids,
 )
-from utils.visualization_utils import plot_graph, plot_shifted_graph
+from utils.visualization_utils import (
+    get_ebc_values_from_gpkg,
+    plot_graph,
+    plot_shifted_graph,
+)
 
 
 #%%
@@ -69,7 +73,7 @@ routes = [r for r in routes if correct_routes(r)]
 # %%
 # fetch graph of bicycle infrastructure
 place_name = 'Nürnberg'
-osmnx.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-13T20:21:02Z"]{maxsize}'
+osmnx.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-21T20:21:22Z"]{maxsize}'
 network_type = 'bike'
 bike_lane_filter = [
     '["cycleway"="lane"]',
@@ -242,21 +246,10 @@ plot_edge_heatmap(gaps, routing_graph, expanded=False, metric='benefit').to_file
 plot_edge_heatmap(gaps, routing_graph, expanded=True, metric='benefit').to_file('graph.gpkg', layer='gaps_exanded_benefit', driver='GPKG')
 
 # %%
+# load ebc values from file
+ebc = get_ebc_values_from_gpkg('ebc.gpkg', 'ebc_area_normalization_population_exponential', routing_graph)
+
 wg: ig.Graph = ig.Graph.from_networkx(routing_graph)
-
-start = time.time()
-ebc = wg.edge_betweenness(directed=True, cutoff=4500, weights="weight")
-end = time.time()
-print(f'calculated edge betweenness centrality in {end - start} seconds')
-
-# save ebc to file
-with open('ebc.pickle', 'wb') as f:
-    pickle.dump(ebc, f)
-
-#%%
-# load ebc from file
-with open('ebc.pickle', 'rb') as f:
-    ebc = pickle.load(f)
 #%%
 def plot_ebc_gap_heatmap(ebc, graph: nx.MultiDiGraph, expanded: bool = False, metric: str = 'count'):
 
