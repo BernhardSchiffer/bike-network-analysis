@@ -18,7 +18,6 @@ import pandas as pd
 import psycopg2
 import shapely
 from dotenv import load_dotenv
-from IPython.display import display
 from tqdm import tqdm
 
 from utils.graph_types import Route
@@ -161,12 +160,12 @@ conn.close()
 
 # %%
 # load all rentals from file
-df = pd.read_csv('vag-rad-data/processed/All_Ausleihen_Kundendetails.csv')
+df_all = pd.read_csv('vag-rad-data/processed/All_Ausleihen_Kundendetails.csv')
 
-df['starting_position'] = shapely.from_wkt(df['starting_position'])
-df['finishing_position'] = shapely.from_wkt(df['finishing_position'])
+df_all['starting_position'] = shapely.from_wkt(df_all['starting_position'])
+df_all['finishing_position'] = shapely.from_wkt(df_all['finishing_position'])
 
-df = gpd.GeoDataFrame(df, geometry='starting_position', crs='EPSG:4326')
+df_all = gpd.GeoDataFrame(df_all, geometry='starting_position', crs='EPSG:4326')
 
 # filter out trips that begin or end outside of the graph area
 place_name = 'Nürnberg'
@@ -174,11 +173,11 @@ nbg_area = fetch_city_polygon(place_name)
 
 graph_polygon = buffer_in_meters(nbg_area, 5000)
 
-starting_positions_in_graph: list = gpd.GeoSeries(df['starting_position'], crs='EPSG:4326').sindex.query(graph_polygon, predicate='contains')
-finishing_positions_in_graph: list = gpd.GeoSeries(df['finishing_position'], crs='EPSG:4326').sindex.query(graph_polygon, predicate='contains')
+starting_positions_in_graph: list = gpd.GeoSeries(df_all['starting_position'], crs='EPSG:4326').sindex.query(graph_polygon, predicate='contains')
+finishing_positions_in_graph: list = gpd.GeoSeries(df_all['finishing_position'], crs='EPSG:4326').sindex.query(graph_polygon, predicate='contains')
 
 valid_indices = set(starting_positions_in_graph).intersection(set(finishing_positions_in_graph))
-df = df.iloc[list(valid_indices)].reset_index(drop=True)
+df = df_all.iloc[list(valid_indices)].reset_index(drop=True)
 
 df
 
@@ -270,6 +269,37 @@ with open('calculated_shortest_routes.pickle', 'rb') as f:
 print(f'loaded {len(shortest_routes)} shortest routes from file')
 
 # %%
+# calculate length of routes
+df_all['shortest_route_length'] = np.nan
+df_all['route_length'] = np.nan
+
+calculated_routes_idx = 0
+for idx, _ in tqdm(df_all.iterrows(), desc='calculate route lengths', total=len(df_all), unit='route'):
+    if idx not in valid_indices:
+        continue
+
+    r = shortest_routes[calculated_routes_idx]
+    if correct_routes(r):
+        r = route_to_edge_ids(r)
+        route_length = sum([graph.edges[edge]['length'] for edge in r])
+        df_all.at[idx, 'shortest_route_length'] = route_length
+    else:
+        df_all.at[idx, 'shortest_route_length'] = np.nan
+
+    r = routes[calculated_routes_idx]
+    if correct_routes(r):
+        r = route_to_edge_ids(r)
+        route_length = sum([graph.edges[edge]['length'] for edge in r])
+        df_all.at[idx, 'route_length'] = route_length
+    else:
+        df_all.at[idx, 'route_length'] = np.nan
+    
+    calculated_routes_idx = calculated_routes_idx + 1
+
+# %%
+df_all
+
+# %%
 # plot heatmap of calculated routes
 counts_values_shortest = get_edge_count([ s for s in shortest_routes if correct_routes(s)], graph)
 plot_edge_count(graph, counts_values_shortest, expanded=True, cmap=plt.get_cmap('turbo')).to_file(filename='graph.gpkg', layer='shortest_path_usage', driver='GPKG')
@@ -279,13 +309,7 @@ plot_edge_count(graph, counts_values_weighted, expanded=True, cmap=plt.get_cmap(
 
 # %%
 # plot histogram of route lengths of shortest routes
-route_lengths = []
-for route in tqdm(shortest_routes, desc='calculate route lengths', unit='route'):
-    if not correct_routes(route):
-        continue
-    r = route_to_edge_ids(route)
-    route_length = sum([graph.edges[edge]['length'] for edge in r], 0)
-    route_lengths.append(route_length)
+route_lengths = df_all['shortest_route_length'].dropna().tolist()
 
 print(f'average length of shortest routes: {np.average(route_lengths)} meters')
 print(f'median length of shortest routes: {np.median(route_lengths)} meters')
@@ -342,13 +366,7 @@ for group, count in length_groups.items():
 
 # %%
 # plot histogram of route lengths of weighted routes
-route_lengths = []
-for route in tqdm(routes, desc='calculate route lengths', unit='route'):
-    if not correct_routes(route):
-        continue
-    r = route_to_edge_ids(route)
-    route_length = sum([graph.edges[edge]['length'] for edge in r], 0)
-    route_lengths.append(route_length)
+route_lengths = df_all['route_length'].dropna().tolist()
 
 print(f'average length of weighted routes: {np.average(route_lengths)} meters')
 print(f'median length of weighted routes: {np.median(route_lengths)} meters')
@@ -404,6 +422,22 @@ for group, count in length_groups.items():
     print(f'{group} meters: {count} routes ({count / len(route_lengths):.2%})')
 
 # %%
+max_distance = 10000
+distance_step = 50
+bins = np.arange(0, max_distance + distance_step, distance_step)
+
+plt.figure(figsize=(10, 6))
+plt.hist([l for l in df_all['shortest_route_length'].dropna().tolist() if l < max_distance], bins=bins, color='#1f78b4', alpha=0.5)
+plt.hist([l for l in df_all['route_length'].dropna().tolist() if l < max_distance], bins=bins, color='#33a02c', alpha=0.5)
+plt.title('Histogram of Route Lengths for VAG-Rad Rentals')
+plt.xlabel('Route Length (meters)')
+plt.ylabel('Number of Rentals')
+plt.xticks(range(0, 10001, 500), rotation=45)
+plt.yticks(range(0, 90001, 10000))
+plt.legend(['Shortest Routes', 'Weighted Routes'], loc='upper right')
+plt.grid()
+plt.savefig('combined_route_lengths_histogram.png', dpi=300)
+# %%
 def get_route_geometry(route: Route, graph: nx.MultiDiGraph) -> shapely.LineString:
     edge_geometries = []
     edges = route_to_edge_ids(route)
@@ -417,6 +451,8 @@ def get_route_geometry(route: Route, graph: nx.MultiDiGraph) -> shapely.LineStri
     route_geometry = shapely.ops.linemerge(edge_geometries)
     return route_geometry
 
+df_all[df_all['shortest_route_length'] > 10000.0]
+# %%
 # show routes that are longer than 20 km
 route_geometries = []
 for idx, route in enumerate(routes):
@@ -453,31 +489,21 @@ shortest_routes = [r for idx, r in shortest_routes.items()]
 routes = [r for idx, r in routes.items()]
 
 # %%
-# calculate length of routes
-shortest_route_lengths = []
-for route in tqdm(shortest_routes, desc='calculate length of shortest routes', unit='routes'):
-    r = route_to_edge_ids(route)
-    route_length = sum([graph.edges[edge]['length'] for edge in r])
-    shortest_route_lengths.append(route_length)
+# calculate detour factor of routes
+shortest_route_lengths = df_all[df_all['shortest_route_length'].notna() & df_all['route_length'].notna()]['shortest_route_length'].to_list()
 
-weighted_route_lengths = []
-for route in tqdm(routes, desc='calculate length of weighted routes', unit='routes'):
-    r = route_to_edge_ids(route)
-    route_length = sum([graph.edges[edge]['length'] for edge in r])
-    weighted_route_lengths.append(route_length)
+weighted_route_lengths = df_all[df_all['shortest_route_length'].notna() & df_all['route_length'].notna()]['route_length'].to_list()
 
-# %%
 # remove routes with zero length
 valid_indices = [i for i, l in enumerate(shortest_route_lengths) if l > 0 and weighted_route_lengths[i] > 0]
 shortest_route_lengths = [shortest_route_lengths[i] for i in valid_indices]
 weighted_route_lengths = [weighted_route_lengths[i] for i in valid_indices]
 
-# calculate detour factor of routes
 detour_factors = []
 for s_length, w_length in zip(shortest_route_lengths, weighted_route_lengths):
     detour_factor = w_length / s_length
     detour_factors.append(detour_factor)
-# %%
+
 avg_detour_factor = np.average(detour_factors)
 median_detour_factor = np.median(detour_factors)
 
@@ -487,29 +513,6 @@ print(f'75 percentile: {np.percentile(detour_factors, 75)}')
 print(f'85 percentile: {np.percentile(detour_factors, 85)}')
 print(f'95 percentile: {np.percentile(detour_factors, 95)}')
 print(f'99 percentile: {np.percentile(detour_factors, 99)}')
-
-# %%
-max_value = max(detour_factors)
-idx_max_value = detour_factors.index(max_value)
-
-display(plot_routes([routes[idx_max_value]], graph, with_markers=True))#.save('max_detour_factor.html')
-display(plot_routes([shortest_routes[idx_max_value]], graph, with_markers=True))#.save('max_detour_factor.html')
-print(max_value)
-
-# %%
-# explore routes with certain detour factors
-limit = 10
-count = 0
-for detour_factor, shortest_route, weighted_route in zip(detour_factors, shortest_routes, routes):
-    if detour_factor > 3.0 and detour_factor < 5.0:
-        print(f'detour factor: {detour_factor}')
-        map = plot_routes([shortest_route, weighted_route], graph, with_markers=True)
-        map.save(f'detour_factor_{detour_factor}.html')
-
-        if limit is not None:
-            count = count + 1
-            if count >= limit:
-                break
 
 # %%
 # load ebc values from file
