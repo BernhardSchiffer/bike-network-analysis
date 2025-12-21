@@ -1,7 +1,6 @@
 # %%
 # imports
 import pickle
-import time
 from collections import Counter
 
 import geopandas as gpd
@@ -17,7 +16,7 @@ from geopandas import GeoDataFrame
 from tqdm import tqdm
 
 from utils.gap_evaluator import GapEvaluator
-from utils.graph_builder import get_turn_direction
+from utils.graph_builder import get_routing_graph_area, get_turn_direction
 from utils.graph_types import LEFT, RIGHT, STRAIGHT, U_TURN, EdgeId, NodeId, Route
 from utils.population_provider import GHSLPopulationProvider
 from utils.service_area_provider import ServiceAreaProvider
@@ -65,14 +64,9 @@ routing_graph = ox.load_graphml('simplified_bicycle_graph.graphml', node_dtypes=
 bicycle_graph =  ox.load_graphml('bicycle_graph.graphml', node_dtypes={'osmid': int}, edge_dtypes={'weight': float, 'penalty': float, 'slope_percentage': float, 'length': float})
 
 # %%
-# load calculated routes from file
-with open('calculated_routes.pickle', 'rb') as f:
-    routes = pickle.load(f)
-
-routes = [r for r in routes if correct_routes(r)]
-# %%
 # fetch graph of bicycle infrastructure
 place_name = 'Nürnberg'
+query_polygon = get_routing_graph_area(place_name, 5000)
 osmnx.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-21T20:21:22Z"]{maxsize}'
 network_type = 'bike'
 bike_lane_filter = [
@@ -96,14 +90,13 @@ custom_filter = []
 custom_filter.extend(bike_lane_filter)
 custom_filter.extend(bike_path_filter)
 custom_filter.extend(bike_road_filter)
-bike_infra_graph = ox.graph_from_place(query=place_name, retain_all=True, simplify=False, custom_filter=custom_filter)
-
+bike_infra_graph = ox.graph_from_polygon(query_polygon, retain_all=True, simplify=False, custom_filter=custom_filter)
 osmids_with_bike_infra = set(edge[2]['osmid'] for edge in bike_infra_graph.edges(data=True) if edge[2].get('osmid', None) is not None)
 
 filter = []
 filter.extend(bike_path_filter)
 filter.extend(bike_road_filter)
-protected_bike_infra_graph = ox.graph_from_place(query=place_name, retain_all=True, simplify=False, custom_filter=filter)
+protected_bike_infra_graph = ox.graph_from_polygon(query_polygon, retain_all=True, simplify=False, custom_filter=filter)
 osmids_with_protected_bike_infra = set(edge[2]['osmid'] for edge in protected_bike_infra_graph.edges(data=True) if edge[2].get('osmid', None) is not None)
 
 # %%
@@ -124,6 +117,14 @@ def get_gaps_for_route(route: Route, graph: nx.MultiDiGraph):
     return (gaps, not_gaps)
 
 #%%
+# load calculated routes from file
+with open('calculated_routes.pickle', 'rb') as f:
+    routes = pickle.load(f)
+
+routes = [r for r in routes if correct_routes(r)]
+
+# %%
+# find gaps through calculated routes
 gaps: list[EdgeId] = []
 not_gaps: list[EdgeId] = []
 for route in tqdm(routes, desc='finding gaps in routes', unit='route'):

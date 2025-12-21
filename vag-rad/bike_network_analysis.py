@@ -1,6 +1,5 @@
 # %% 
 # imports
-import datetime
 from collections import Counter
 
 import folium
@@ -13,16 +12,15 @@ import numpy as np
 import osmium
 import osmnx as ox
 import osmnx.settings
+import overpy
+import shapely
 from IPython.display import display
 from matplotlib.cm import get_cmap
 from osmium import FileProcessor
 from osmium.filter import EmptyTagFilter, EntityFilter
 from osmium.osm import WAY
-from osmnx.simplification import simplify_graph
-from shapely import LineString
 from tqdm import tqdm
 
-from utils.graph_builder import GraphBuilder, route_choice_model_1
 from utils.overpass_utils import fetch_city_polygon
 from utils.polygon_filter import PolygonFilter
 from utils.population_provider import (
@@ -32,6 +30,19 @@ from utils.population_provider import (
 from utils.service_area_provider import ServiceAreaProvider
 from utils.utils import get_path_length
 
+
+# helper function
+def query_overpass(custom_filter: str, api = overpy.Overpass(url='https://maps.mail.ru/osm/tools/overpass/api/interpreter')) -> overpy.Result:
+    query = f"""
+                [out:json][timeout:60][date:"2025-10-21T20:21:22Z"];
+                (
+                    {custom_filter}
+                );
+                out body;
+                >;
+                out skel qt;
+            """
+    return api.query(query)
 # %% 
 # evaluation of osm features in Nürnberg
 print("Total number of objects in Mittelfranken:", sum(1 for o in osmium.FileProcessor('mittelfranken-latest.osm.pbf')))
@@ -82,112 +93,72 @@ sorted(bicycle_stats.most_common(len(bicycle_stats)))
 # fetch graph of all streets available by bike
 place_name = 'Nürnberg'
 query_polygon = fetch_city_polygon(place_name)
-# use specific overpass settings
-osmnx.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-21T20:21:22Z"]{maxsize}'
 
-bikeable_ways = (
-        '["highway"]["area"!~"yes"]["access"!~"private"]'
-        '["highway"!~"abandoned|bus_guideway|construction|corridor|elevator|escalator|footway|'
-        'motor|no|planned|platform|proposed|raceway|razed|steps"]'
-        '["bicycle"!~"no"]["service"!~"private"]'
-    )
+xmin, ymin, xmax, ymax = query_polygon.bounds
+bbox = (ymin, xmin, ymax, xmax)
 
-bikeable_areas = '["area"~"yes"]["bicycle"~"yes"]'
-bikeable_footpaths = '["highway"~"footway"]["bicycle"~"yes|designated|dismount"]'
-bikeable_crossings = '["crossing"~"yes"]["bicycle"~"yes"]'
+protected_bike_infra = f"""
+(
+    way["bicycle"="designated"]{bbox};
+    way["highway"="cycleway"]{bbox};
+    way["cycleway"="track"]{bbox};
+    way["cycleway:right"="track"]{bbox};
+    way["cycleway:left"="track"]{bbox};
+    way["cycleway:both"="track"]{bbox};
+);
+-
+way["bicycle_road"~"yes"]{bbox};
+"""
 
-routing_graph = ox.graph_from_polygon(polygon=query_polygon, simplify=False, retain_all=True, custom_filter=[bikeable_ways, bikeable_areas, bikeable_footpaths])
-print('number of edges in bikeable graph:', len(routing_graph.edges))
+all_bike_infra = f"""
+way["cycleway"="lane"]{bbox};
+way["cycleway:right"="lane"]{bbox};
+way["cycleway:left"="lane"]{bbox};
+way["cycleway:both"="lane"]{bbox};
+way["cycleway"="opposite"]{bbox};
+way["bicycle"="designated"]{bbox};
+way["highway"="cycleway"]{bbox};
+way["cycleway"="track"]{bbox};
+way["cycleway:right"="track"]{bbox};
+way["cycleway:left"="track"]{bbox};
+way["cycleway:both"="track"]{bbox};
+way["bicycle_road"="yes"]{bbox};
+"""
 
-not_bikeable_ways = '["highway"~"pedestrian"]["bicycle"!~"yes"]'
-service_ways = '["highway"~"service"]["access"="no"]'
-bus_only_ways = '["highway"~"service"]["bus"="yes"]'
-trams_only_ways = '["highway"~"service"]["railway"="yes"]'
+protected_bike_infra_osmids = query_overpass(protected_bike_infra).get_way_ids()
 
-not_bikeable_graph = ox.graph_from_place(query=place_name, simplify=False, retain_all=True, custom_filter=[not_bikeable_ways, service_ways, bus_only_ways, trams_only_ways])
-print('number of edges in not bikeable graph:', len(not_bikeable_graph.edges))
+all_bike_infra_osmids = query_overpass(all_bike_infra).get_way_ids()
 
-for e in tqdm(not_bikeable_graph.edges, desc='remove not bikeable edges', total=len(not_bikeable_graph.edges), unit='edges'):
-    # remove edges that are not bikeable
-    if routing_graph.has_edge(*e):
-        routing_graph.remove_edge(*e)
+# %%
+# construct graphs of protected and all bicycle infrastructure
+bicycle_graph =  ox.load_graphml('bicycle_graph.graphml', node_dtypes={'osmid': int}, edge_dtypes={'weight': float, 'penalty': float, 'slope_percentage': float, 'length': float})
 
-print('number of edges in bikeable graph after removing not bikeable edges:', len(routing_graph.edges))
-
-routing_graph = simplify_graph(routing_graph, remove_rings=False, edge_attrs_differ=['osmid'])
-
-# add geometry to straight edges that do not have a geometry
-for u, v, key, data in routing_graph.edges(data=True, keys=True):
-    if data.get('geometry', None) is None:
-        geometry = LineString([[routing_graph.nodes[u]['x'], routing_graph.nodes[u]['y']], [routing_graph.nodes[v]['x'], routing_graph.nodes[v]['y']]])
-        routing_graph.edges[u, v, key]['geometry'] = geometry
-
-print('number of edges in bikeable graph after simplifying:', len(routing_graph.edges))
-
-# set node and edge attributes
-graph_builder = GraphBuilder(query_polygon, route_choice_model_1)
-
-# add paths where the street is oneway but bikes are allowed in both directions
-edge_count_before = len(routing_graph.edges)
-routing_graph = graph_builder.add_paths_for_bikeable_oneways(routing_graph)
-print(f'added {len(routing_graph.edges) - edge_count_before} paths that are bikeable in both directions')
-
-routing_graph = graph_builder.set_node_attributes(routing_graph)
-routing_graph = graph_builder.set_edge_slope(routing_graph)
-
-routing_graph = graph_builder.set_edge_weights(routing_graph)
-
-nodes_df, edges_df = ox.graph_to_gdfs(routing_graph, nodes=True, edges=True)
-edges_df.to_file('graph.gpkg', layer='original_graph_edges', driver='GPKG')
-nodes_df.drop(columns=['osmid']).to_file('graph.gpkg', layer='original_graph_nodes', driver='GPKG')
-
-# fetch graph of bicycle infrastructure
-bike_lane_filter = [
-    '["cycleway"="lane"]',
-    '["cycleway:right"="lane"]',
-    '["cycleway:left"="lane"]',
-    '["cycleway:both"="lane"]',
-    '["cycleway"="opposite"]'
-]
-bike_path_filter = [
-    '["bicycle"="designated"]',
-    '["highway"="cycleway"]',
-    '["cycleway"="track"]',
-    '["cycleway:right"="track"]',
-    '["cycleway:left"="track"]',
-    '["cycleway:both"="track"]'
-]
-bike_road_filter = [
-    '["bicycle_road"="yes"]'
-]
-custom_filter = bike_path_filter
-bicycle_infrastructure = ox.graph_from_place(query=place_name, retain_all=True, custom_filter=custom_filter, simplify=False)
-nbg_graph = ox.graph_from_place(query=place_name, retain_all=True, network_type='all_public')
-
-bike_infra_osmids = set()
-for u, v, key, data in bicycle_infrastructure.edges(data=True, keys=True):
-    osmid = data.get('osmid', None)
-    if osmid is not None:
-        bike_infra_osmids.add(osmid)
-
-bicycle_infrastructure_graph = routing_graph.copy()
-
+# construct bicycle infrastructure graph
+bicycle_infrastructure_graph = bicycle_graph.copy()
 edges_to_remove = []
 for u, v, key, data in bicycle_infrastructure_graph.edges(data=True, keys=True):
     osmid = data.get('osmid', None)
-    if osmid is None or osmid not in bike_infra_osmids:
+    if osmid is None or osmid not in all_bike_infra_osmids:
         edges_to_remove.append((u, v, key))
-
 bicycle_infrastructure_graph.remove_edges_from(edges_to_remove)
-
 bicycle_infrastructure_graph.remove_nodes_from(list(nx.isolates(bicycle_infrastructure_graph)))
 
 ox.graph_to_gdfs(bicycle_infrastructure_graph, nodes=True, edges=False).drop(columns=['osmid']).to_file('graph.gpkg', layer='bicycle_infrastructure_nodes', driver='GPKG')
 ox.graph_to_gdfs(bicycle_infrastructure_graph, nodes=False, edges=True).to_file('graph.gpkg', layer='bicycle_infrastructure', driver='GPKG')
 
-# %%
-# get utc timestamp in iso format
-current_timestamp = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(timespec='seconds') + 'Z'
+# construct protected bicycle infrastructure graph
+protected_bicycle_infrastructure_graph = bicycle_graph.copy()
+edges_to_remove = []
+for u, v, key, data in protected_bicycle_infrastructure_graph.edges(data=True, keys=True):
+    osmid = data.get('osmid', None)
+    if osmid is None or osmid not in protected_bike_infra_osmids:
+        edges_to_remove.append((u, v, key))
+protected_bicycle_infrastructure_graph.remove_edges_from(edges_to_remove)
+protected_bicycle_infrastructure_graph.remove_nodes_from(list(nx.isolates(protected_bicycle_infrastructure_graph)))
+
+ox.graph_to_gdfs(protected_bicycle_infrastructure_graph, nodes=True, edges=False).drop(columns=['osmid']).to_file('graph.gpkg', layer='protected_bicycle_infrastructure_nodes', driver='GPKG')
+ox.graph_to_gdfs(protected_bicycle_infrastructure_graph, nodes=False, edges=True).to_file('graph.gpkg', layer='protected_bicycle_infrastructure', driver='GPKG')
+
 # %%
 place_name = 'Nürnberg'
 # use specific overpass settings
@@ -284,60 +255,80 @@ print(f'median length of component: {lengths[int(len(lengths)/2)]} meters')
 
 # %%
 # analyse the coverage of the bike network
-bicycle_graph =  ox.load_graphml('bicycle_graph.graphml', node_dtypes={'osmid': int}, edge_dtypes={'weight': float, 'penalty': float, 'slope_percentage': float, 'length': float})
-
 service_area_provider = ServiceAreaProvider(
     coverage_distance=300,
     buffer_value=50,
     routing_graph=bicycle_graph)
 
-protected_bike_infra_coverage, _ = service_area_provider.get_service_area(list(bicycle_infrastructure_graph.nodes))
+# %%
+def remove_edges_below_length_threshold(graph: nx.MultiDiGraph, length_threshold: float) -> nx.MultiGraph:
+    g = graph.copy()
+    g = osmnx.convert.to_undirected(g)
+    components = nx.connected_components(g)
+    edges_to_remove = []
+    for c in components:
+        component_graph = g.subgraph(c).copy()
+        length = get_path_length(component_graph)
+        if length < length_threshold:
+            edges_to_remove.extend(list(component_graph.edges))
+    g.remove_edges_from(edges_to_remove)
+    g.remove_nodes_from(list(nx.isolates(g)))
+    return g
 
-protected_bike_infra_coverage
+# compute the coverage of the bicycle infrastructure
+meaningful_bicycle_infra_graph = remove_edges_below_length_threshold(bicycle_infrastructure_graph, length_threshold=200)
+
+bike_infra_coverage, _ = service_area_provider.get_service_area(list(meaningful_bicycle_infra_graph.nodes))
+
+
+# compute the coverage of protected bicycle infrastructure
+meaningful_bicycle_infra_graph = remove_edges_below_length_threshold(protected_bicycle_infrastructure_graph, length_threshold=200)
+
+protected_bike_infra_coverage, _ = service_area_provider.get_service_area(list(meaningful_bicycle_infra_graph.nodes))
 
 # %%
 nbg_place = ox.geocode_to_gdf('Nürnberg')
 nbg_polygon = nbg_place['geometry'].values[0]
 
+gpd.GeoDataFrame(geometry=[nbg_polygon], crs=4326, columns=['geometry']).to_file('bike_infra_coverage.gpkg', layer='nbg_polygon', driver='GPKG')
+
 population_provider = NurenbergDistrictPopulationProvider()
 
 nbg_total_population = population_provider.get_population_in_polygon(nbg_polygon)
 
-population_near_bike_infra = population_provider.get_population_in_polygon(protected_bike_infra_coverage)
+population_near_bike_infra = population_provider.get_population_in_polygon(bike_infra_coverage)
+
+population_near_protected_bike_infra = population_provider.get_population_in_polygon(protected_bike_infra_coverage)
 
 print(f'Total population in Nürnberg: {nbg_total_population:.0f}')
-print(f'Population near protected bike infrastructure: {population_near_bike_infra:.0f}')
-print(f'Population near protected bike infrastructure: {population_near_bike_infra / nbg_total_population * 100:.2f}%')
-print(f'The area 300 meters away from bike infrastructure covers {protected_bike_infra_coverage.area / nbg_polygon.area * 100:.2f}% of Nürnberg')
+print('---')
+print(f'Population near protected bike infrastructure: {population_near_protected_bike_infra:.0f} ({population_near_protected_bike_infra / nbg_total_population * 100:.2f}%)')
+print(f'The area 300 meters away from protected bike infrastructure covers {shapely.intersection(nbg_polygon, protected_bike_infra_coverage).area / nbg_polygon.area * 100:.2f}% of Nürnberg')
+print('---')
+print(f'Population near any bike infrastructure: {population_near_bike_infra:.0f} ({population_near_bike_infra / nbg_total_population * 100:.2f}%)')
+print(f'The area 300 meters away from any bike infrastructure covers {shapely.intersection(nbg_polygon, bike_infra_coverage).area / nbg_polygon.area * 100:.2f}% of Nürnberg')
 
 # %%
-# read bike network polygon from file
-protected_bike_infra_coverage = gpd.read_file('protected_bike_infra_coverage.gpkg', layer=f'protected_bike_infra_coverage_{30}').to_crs(4326)['geometry'].values[0]
-protected_bike_infra_coverage
+# save for visualization
+gpd.GeoDataFrame(geometry=[shapely.intersection(nbg_polygon, bike_infra_coverage)], crs=4326, columns=['geometry']).to_file('bike_infra_coverage.gpkg', layer='all_bike_infra_coverage_nbg', driver='GPKG')
+
+gpd.GeoDataFrame(geometry=[shapely.intersection(nbg_polygon, protected_bike_infra_coverage)], crs=4326, columns=['geometry']).to_file('bike_infra_coverage.gpkg', layer='protected_bike_infra_coverage_nbg', driver='GPKG')
+
+edges = ox.graph_to_gdfs(protected_bicycle_infrastructure_graph, nodes=False, edges=True)
+all_lines = shapely.MultiLineString(edges['geometry'].values)
+all_lines = shapely.intersection(nbg_polygon, all_lines)
+gpd.GeoDataFrame(geometry=[all_lines], crs=4326, columns=['geometry']).to_file('bike_infra_coverage.gpkg', layer='protected_bike_infra_nbg', driver='GPKG')
+
+edges = ox.graph_to_gdfs(bicycle_infrastructure_graph, nodes=False, edges=True)
+all_lines = shapely.MultiLineString(edges['geometry'].values)
+all_lines = shapely.intersection(nbg_polygon, all_lines)
+gpd.GeoDataFrame(geometry=[all_lines], crs=4326, columns=['geometry']).to_file('bike_infra_coverage.gpkg', layer='all_bike_infra_nbg', driver='GPKG')
+
 # %%
 # plot the distribution of the length of protected bike infrastructure
-bike_lane_filter = [
-    '["cycleway"="lane"]',
-    '["cycleway:right"="lane"]',
-    '["cycleway:left"="lane"]',
-    '["cycleway:both"="lane"]'
-]
-bike_path_filter = [
-    '["bicycle"="designated"]',
-    '["highway"="cycleway"]',
-    '["cycleway"="track"]',
-    '["cycleway:right"="track"]',
-    '["cycleway:left"="track"]',
-    '["cycleway:both"="track"]'
-]
-bike_road_filter = [
-    '["bicycle_road"="yes"]'
-]
-custom_filter = bike_path_filter
-tmp = ox.graph_from_place(query='Nürnberg', retain_all=True, custom_filter=custom_filter, simplify=True)
-components = nx.connected_components(tmp.to_undirected())
+components = nx.connected_components(osmnx.convert.to_undirected(protected_bicycle_infrastructure_graph))
 
-length_of_components = [get_path_length(tmp.subgraph(c)) for c in components]
+length_of_components = [get_path_length(protected_bicycle_infrastructure_graph.subgraph(c)) for c in components]
 
 boxplt = plt.boxplot(length_of_components)
 plt.title('length of protected bike infrastructure components')

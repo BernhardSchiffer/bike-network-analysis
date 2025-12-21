@@ -95,7 +95,8 @@ class ServiceAreaProvider():
                 reachable_edges.append(self.service_areas.loc[node][self.reachable_edges_key])
                 areas.append(self.service_areas.loc[node][self.service_area_key])
             except KeyError:
-                raise KeyError(f'node {node} not found in service areas')
+                pass
+                #raise KeyError(f'node {node} not found in service areas')
         gap_polygon = ox.graph_to_gdfs(self.routing_graph.subgraph(gap), nodes=False, edges=True).to_crs(25832).buffer(self.buffer_value, cap_style='square').to_crs(4326).union_all()
         areas.append(gap_polygon)
         gap_coverage_polygon = shapely.union_all(areas)

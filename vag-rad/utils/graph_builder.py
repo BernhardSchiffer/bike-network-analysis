@@ -17,7 +17,9 @@ from tqdm import tqdm
 
 from utils.elevation_provider import DEMElevationProvider
 from utils.graph_types import LEFT, RIGHT, STRAIGHT, EdgeId, TurnDirection
+from utils.overpass_utils import fetch_city_polygon
 from utils.polygon_filter import PolygonFilter
+from utils.utils import buffer_in_meters
 
 type Forward = 'Forward'
 type Backward = 'Backward'
@@ -26,6 +28,10 @@ type StreetDirection = Forward | Backward
 type OsmTags = dict[str, str]
 type StreetFeatureFilter = Callable[[OsmTags, StreetDirection], bool]
 type RouteChoice = tuple[StreetFeatureFilter, float]
+
+def get_routing_graph_area(place_name: str, buffer: float) -> shapely.Polygon | shapely.MultiPolygon:
+    nbg_area = fetch_city_polygon(place_name)
+    return buffer_in_meters(nbg_area, buffer)
 
 def get_edge_by_osmid(graph: nx.MultiDiGraph, osmid) -> EdgeId:
     for edge in graph.edges(data=True, keys=True):

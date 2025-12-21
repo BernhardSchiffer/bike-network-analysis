@@ -8,6 +8,7 @@ from tqdm import tqdm
 
 from utils.graph_builder import (
     GraphBuilder,
+    get_routing_graph_area,
     route_choice_model_1,
     route_choice_model_2,
     split_nodes,
@@ -20,9 +21,7 @@ from utils.visualization_utils import plot_graph, plot_shifted_graph
 # fetch graph of all streets available by bike
 # get nuremberg area
 place_name = 'Nürnberg'
-nbg_area = fetch_city_polygon(place_name)
-
-query_polygon = buffer_in_meters(nbg_area, 5000)
+query_polygon = get_routing_graph_area(place_name, 5000)
 
 # get poygon of boundingbox
 #bbox = 10.963379,49.559561,10.964554,49.560205 # loop
@@ -126,10 +125,7 @@ nodes_df.to_file(filename='graph.gpkg', layer='routing_graph_nodes', driver='GPK
 # fetch graph of all streets available by bike
 # get nuremberg area
 place_name = 'Nürnberg'
-nbg_area = fetch_city_polygon(place_name)
-
-# create bbox with 4km buffer around nuremberg area
-query_polygon = buffer_in_meters(nbg_area, 5000)
+query_polygon = get_routing_graph_area(place_name, 5000)
 
 # use specific overpass settings
 osmnx.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-21T20:21:22Z"]{maxsize}'
