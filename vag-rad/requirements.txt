@@ -26,7 +26,7 @@ gdown==5.2.0
 geojson==3.2.0
 geopandas==1.0.1
 idna==3.10
--e git+ssh://git@github.com/BernhardSchiffer/python-igraph.git@1d98d797e5f558a6b85937af2a83f8d43f261158#egg=igraph
+-e git+ssh://git@github.com/BernhardSchiffer/python-igraph.git@150c1ea573599a41efc3219bfbce418ade97559f#egg=igraph
 ipyevents==2.0.2
 ipyfilechooser==0.6.0
 ipykernel==6.29.5
