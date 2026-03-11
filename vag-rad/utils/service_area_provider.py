@@ -86,18 +86,19 @@ class ServiceAreaProvider():
 
         return gpd.GeoSeries(service_areas, index=self.service_areas.index, crs=4326, name=self.service_area_key)
     
-    def get_service_area(self, gap: list[int]) -> tuple[shapely.Polygon, list[shapely.LineString]]:
+    def get_service_area(self, gap_graph: nx.MultiDiGraph | nx.MultiGraph) -> tuple[shapely.Polygon, list[shapely.LineString]]:
+        nodes = list(gap_graph.nodes)
         reachable_edges = []
         areas = []
 
-        for node in gap:
+        for node in nodes:
             try:
                 reachable_edges.append(self.service_areas.loc[node][self.reachable_edges_key])
                 areas.append(self.service_areas.loc[node][self.service_area_key])
             except KeyError:
                 pass
                 #raise KeyError(f'node {node} not found in service areas')
-        gap_polygon = ox.graph_to_gdfs(self.routing_graph.subgraph(gap), nodes=False, edges=True).to_crs(25832).buffer(self.buffer_value, cap_style='square').to_crs(4326).union_all()
+        gap_polygon = ox.graph_to_gdfs(gap_graph, nodes=False, edges=True).to_crs(25832).buffer(self.buffer_value, cap_style='square').to_crs(4326).union_all()
         areas.append(gap_polygon)
         gap_coverage_polygon = shapely.union_all(areas)
 

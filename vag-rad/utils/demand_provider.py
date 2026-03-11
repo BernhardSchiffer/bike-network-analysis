@@ -34,7 +34,7 @@ class VagRadDemandProvider(DemandProvider):
         self.rental_data_finishing.drop(columns=['starting_position'], inplace=True)
 
     def get_demand_at_point(self, point: shapely.Point) -> tuple[float, float]:
-        area_of_interest = buffer_in_meters(point, 50)
+        area_of_interest = buffer_in_meters(point, 100)
         rental_starts = self.rental_data_starting.sindex.query(area_of_interest, predicate='contains')
         rental_endings = self.rental_data_finishing.sindex.query(area_of_interest, predicate='contains')
         return (len(rental_starts), len(rental_endings))

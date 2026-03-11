@@ -120,7 +120,7 @@ def default_render_order_func(count):
 
 # give higher difference values a higher render order
 def diff_render_order_func(count):
-    return abs(0.5 - count)
+    return abs(count)
 
 def plot_edge_betweenness_centrality(graph: nx.MultiDiGraph, ebc: list[float], expanded: bool = False, cmap = plt.get_cmap('turbo'), normalize: bool = True, render_order_func: RenderOrderFunc = default_render_order_func) -> DataFrame:
     return plot_edge_count(graph, ebc, expanded, cmap, normalize, render_order_func)
@@ -232,8 +232,8 @@ def compare_ebc_values(ebc1: list[float], ebc2: list[float]) -> list[float]:
     ebc2_norm = np.divide(ebc2, max(ebc2))
 
     # bring differences to range [0, 1] with 0.5 as no difference
-    ebc_diff = np.subtract(ebc1_norm, ebc2_norm)
-    ebc_diff = np.add(ebc_diff, 1.0)
-    ebc_diff = np.divide(ebc_diff, 2.0)
+    ebc_diff = np.subtract(ebc2_norm, ebc1_norm)
+    #ebc_diff = np.add(ebc_diff, 1.0)
+    #ebc_diff = np.divide(ebc_diff, 2.0)
 
     return ebc_diff.tolist()

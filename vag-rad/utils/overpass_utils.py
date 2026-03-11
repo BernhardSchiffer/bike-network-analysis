@@ -77,3 +77,15 @@ def fetch_city_polygon(city_name: str, api: overpy.Overpass = overpy.Overpass(ur
         raise ValueError(f'No area found for {city_name}')
     else:
         return get_polygon_from_result(result)
+    
+def query_overpass(custom_filter: str, api = overpy.Overpass(url='https://maps.mail.ru/osm/tools/overpass/api/interpreter')) -> overpy.Result:
+    query = f"""
+                [out:json][timeout:60][date:"2025-10-21T20:21:22Z"];
+                (
+                    {custom_filter}
+                );
+                out body;
+                >;
+                out skel qt;
+            """
+    return api.query(query)

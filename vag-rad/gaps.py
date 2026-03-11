@@ -4,21 +4,21 @@ import pickle
 from collections import Counter
 
 import geopandas as gpd
-import igraph as ig
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import networkx as nx
+import numpy as np
 import osmnx as ox
-import osmnx.settings
 import pandas as pd
 import shapely
 from geopandas import GeoDataFrame
 from tqdm import tqdm
 
-from utils.gap_evaluator import GapEvaluator
+from utils.gap_evaluator import Gap, GapEvaluator, GapPath, merge_gaps
 from utils.graph_builder import get_routing_graph_area, get_turn_direction
-from utils.graph_types import LEFT, RIGHT, STRAIGHT, U_TURN, EdgeId, NodeId, Route
-from utils.population_provider import GHSLPopulationProvider
+from utils.graph_types import LEFT, RIGHT, STRAIGHT, EdgeId, NodeId, Route
+from utils.overpass_utils import fetch_city_polygon, query_overpass
+from utils.population_provider import NurenbergDistrictPopulationProvider
 from utils.service_area_provider import ServiceAreaProvider
 from utils.utils import (
     correct_routes,
@@ -54,9 +54,6 @@ def get_all_osmids(edge_osmid: int | list[int] | tuple[int|list[int], int|list[i
             return osmid_0 + osmid_1
     return []
 
-def is_osmid_in_edge_osmid(edge_osmid: int | list[int] | tuple[int|list[int], int|list[int]], osmid: int) -> bool:
-    return osmid in get_all_osmids(edge_osmid)
-
 # %%
 # load graph from file
 routing_graph = ox.load_graphml('simplified_bicycle_graph.graphml', node_dtypes={'osmid': str}, edge_dtypes={'weight': float, 'shifted_geometry': lambda x: shapely.from_wkt(x), 'osmid': parse_junction_osmid, 'penalty': float, 'slope_percentage': float, 'length': float, 'old_edge_key': parse_old_edge_key})
@@ -64,40 +61,44 @@ routing_graph = ox.load_graphml('simplified_bicycle_graph.graphml', node_dtypes=
 bicycle_graph =  ox.load_graphml('bicycle_graph.graphml', node_dtypes={'osmid': int}, edge_dtypes={'weight': float, 'penalty': float, 'slope_percentage': float, 'length': float})
 
 # %%
-# fetch graph of bicycle infrastructure
+# fetch osmids of bicycle infrastructure in Nürnberg
 place_name = 'Nürnberg'
 query_polygon = get_routing_graph_area(place_name, 5000)
-osmnx.settings.overpass_settings = '[out:json][timeout:{timeout}][date:"2025-10-21T20:21:22Z"]{maxsize}'
-network_type = 'bike'
-bike_lane_filter = [
-    '["cycleway"="lane"]',
-    '["cycleway:right"="lane"]',
-    '["cycleway:left"="lane"]',
-    '["cycleway:both"="lane"]'
-]
-bike_path_filter = [
-    '["bicycle"="designated"]',
-    '["highway"="cycleway"]',
-    '["cycleway"="track"]',
-    '["cycleway:right"="track"]',
-    '["cycleway:left"="track"]',
-    '["cycleway:both"="track"]'
-]
-bike_road_filter = [
-    '["bicycle_road"="yes"]'
-]
-custom_filter = []
-custom_filter.extend(bike_lane_filter)
-custom_filter.extend(bike_path_filter)
-custom_filter.extend(bike_road_filter)
-bike_infra_graph = ox.graph_from_polygon(query_polygon, retain_all=True, simplify=False, custom_filter=custom_filter)
-osmids_with_bike_infra = set(edge[2]['osmid'] for edge in bike_infra_graph.edges(data=True) if edge[2].get('osmid', None) is not None)
 
-filter = []
-filter.extend(bike_path_filter)
-filter.extend(bike_road_filter)
-protected_bike_infra_graph = ox.graph_from_polygon(query_polygon, retain_all=True, simplify=False, custom_filter=filter)
-osmids_with_protected_bike_infra = set(edge[2]['osmid'] for edge in protected_bike_infra_graph.edges(data=True) if edge[2].get('osmid', None) is not None)
+xmin, ymin, xmax, ymax = query_polygon.bounds
+bbox = (ymin, xmin, ymax, xmax)
+
+protected_bike_infra = f"""
+(
+    way["bicycle"="designated"]{bbox};
+    way["highway"="cycleway"]{bbox};
+    way["cycleway"="track"]{bbox};
+    way["cycleway:right"="track"]{bbox};
+    way["cycleway:left"="track"]{bbox};
+    way["cycleway:both"="track"]{bbox};
+);
+-
+way["bicycle_road"~"yes"]{bbox};
+"""
+
+all_bike_infra = f"""
+way["cycleway"="lane"]{bbox};
+way["cycleway:right"="lane"]{bbox};
+way["cycleway:left"="lane"]{bbox};
+way["cycleway:both"="lane"]{bbox};
+way["cycleway"="opposite"]{bbox};
+way["bicycle"="designated"]{bbox};
+way["highway"="cycleway"]{bbox};
+way["cycleway"="track"]{bbox};
+way["cycleway:right"="track"]{bbox};
+way["cycleway:left"="track"]{bbox};
+way["cycleway:both"="track"]{bbox};
+way["bicycle_road"="yes"]{bbox};
+"""
+
+osmids_with_protected_bike_infra = query_overpass(protected_bike_infra).get_way_ids()
+
+osmids_with_bike_infra = query_overpass(all_bike_infra).get_way_ids()
 
 # %%
 # finding gaps between bicycle paths
@@ -250,7 +251,8 @@ plot_edge_heatmap(gaps, routing_graph, expanded=True, metric='benefit').to_file(
 # load ebc values from file
 ebc = get_ebc_values_from_gpkg('ebc.gpkg', 'ebc_area_normalization_population_exponential', routing_graph)
 
-wg: ig.Graph = ig.Graph.from_networkx(routing_graph)
+norm_ebc = np.divide(ebc, max(ebc))
+
 #%%
 def plot_ebc_gap_heatmap(ebc, graph: nx.MultiDiGraph, expanded: bool = False, metric: str = 'count'):
 
@@ -363,21 +365,97 @@ plot_ebc_gap_heatmap(ebc, routing_graph, expanded=False, metric='benefit').to_fi
 plot_ebc_gap_heatmap(ebc, routing_graph, expanded=True, metric='benefit').to_file('graph.gpkg', layer='gaps_ebc_exanded_benefit', driver='GPKG')
 
 # %%
+def line_is_in_area(line: shapely.LineString, area: shapely.Polygon) -> bool:
+    return area.contains(line) or area.intersects(line)
+# %%
 # plot edge betweenness centrality
-edges_with_ebc = sorted([(x,z) for x, z in zip(wg.es, ebc)], key=lambda x: x[1], reverse=False)
-edges_with_ebc = [x for x in edges_with_ebc if type(x[0]['osmid']) is list or type(x[0]['osmid']) is int]
-counts = [c for e, c in edges_with_ebc]
-plt.scatter(range(len(counts)), counts, s=1, c='blue')
-plt.ylabel('edge betweenness centrality')
-plt.yticks(range(0, int(max(counts)), 10_000_000))
-plt.title('edge betweenness centrality of all edges')
+# filter out turning edges
+nbg_area = fetch_city_polygon('Nürnberg')
+edges_with_ebc = [(edge, count) for edge, count in zip(routing_graph.edges, ebc) if routing_graph.edges[edge].get('turning_angle', None) is None]
+# filter edges that are within the area of nuremberg
+edges_with_ebc = [(edge, count) for edge, count in edges_with_ebc if line_is_in_area(routing_graph.edges[edge]['geometry'], nbg_area)]
+
+ebc_values = [c for e, c in edges_with_ebc]
+ebc_values = np.divide(ebc_values, max(ebc_values))
+ebc_values = sorted(ebc_values)
+
+percentage = 1.0 - 0.2
+
+plt.scatter(range(len(ebc_values)), ebc_values, s=1, c='#1f78b4')
+plt.ylabel('normalized edge betweenness centrality')
+plt.xlabel('number of edges')
+plt.title('sorted edge betweenness centrality of all roads')
+plt.axvline(x=len(ebc_values) * percentage, color='#33a02c', linestyle='--', label=f'Top {1.0 - percentage:.0%} of edges')
+plt.axhline(y=ebc_values[int(len(ebc_values) * percentage)], color='#e31a1c', linestyle='--', label=f'{ebc_values[int(len(ebc_values) * percentage)]:.2} normalized ebc')
+plt.legend()
 plt.grid()
+#plt.savefig('ebc_distribution.png', dpi=300)
 plt.show()
+ebc_sum = sum(ebc_values)
+top_ebc_sum = sum(ebc_values[int(len(ebc_values) * percentage):])
+print(f'top {1.0 - percentage:.0%} edges account for {top_ebc_sum / ebc_sum * 100:.2f}% of the total edge betweenness centrality')
+
+# %%
+# plot top 5% edges
+nbg_area = fetch_city_polygon('Nürnberg')
+ebc_sorted = sorted(ebc)
+ebc_cutoff = ebc_sorted[int(len(ebc_sorted) * 0.95)]
+print('edge betweenness centrality cutoff for top 10% edges:', ebc_cutoff)
+edges_with_ebc = [(edge, count) for edge, count in zip(routing_graph.edges, ebc)]
+
+# filter edges that are within the area of Nuremberg
+edges_with_ebc = [(edge, count) for edge, count in edges_with_ebc if line_is_in_area(routing_graph.edges[edge]['shifted_geometry'], nbg_area)]
+top_10_edges_with_ebc = [edge for edge, count in edges_with_ebc if count >= ebc_cutoff]
+
+edges_df = ox.graph_to_gdfs(routing_graph.edge_subgraph(top_10_edges_with_ebc), nodes=False, edges=True)
+
+# %%
+# convert graph to geodataframe with selected attributes
+def graph_to_gdf(graph: nx.MultiDiGraph, arguments: set[str], geometry: str = 'geometry') -> GeoDataFrame:
+    arguments.add(geometry)
+
+    df_keys = {'u': [], 'v': [], 'key': []}
+    df_arguments = {arg: [] for arg in arguments}
+
+    for u, v, key, data in graph.edges(data=True, keys=True):
+        df_keys['u'].append(u)
+        df_keys['v'].append(v)
+        df_keys['key'].append(key)
+
+        for arg in df_arguments:
+            df_arguments[arg].append(data.get(arg, np.nan))
+
+    # combine both dictionaries
+    edges_df = pd.DataFrame(df_arguments, index=pd.MultiIndex.from_tuples(zip(df_keys['u'], df_keys['v'], df_keys['key']), names=['u', 'v', 'key']))
+    edges_df = GeoDataFrame(edges_df, geometry=geometry, crs='EPSG:4326')
+    return edges_df
+
+ebc_norm = np.divide(ebc, max(ebc))
+
+# apply ebc values to routing graph
+for edge, count in zip(routing_graph.edges(keys=True), ebc_norm):
+    u, v, key = edge
+    routing_graph.edges[u, v, key]['count'] = count
+
+graph_to_gdf(routing_graph, arguments={'osmid', 'length', 'count', 'color', 'applied_filters'}, geometry='shifted_geometry').to_file('test_graph.gpkg', layer='graph', driver='GPKG')
+
+# %%
+types = set()
+for edge, count in zip(routing_graph.edges(keys=True), ebc):
+    u, v, key = edge
+    osmid = routing_graph.edges[u, v, key].get('applied_filters', None)
+    types.add(type(osmid))
+
+types
+
+# %%
+edges_df.drop(columns=['geometry']).set_geometry('shifted_geometry').to_file('graph.gpkg', layer='top_10_percent_ebc_edges', driver='GPKG')
 
 #%%
 # get most important edges in the graph. X% of traffic goes over x amount if edges
 important_edges = []
 percentage_of_traffic = 0.9
+edges_with_ebc = sorted(edges_with_ebc, key=lambda edge_count: edge_count[1], reverse=False)
 sum_of_ebc = sum([c for _, c in edges_with_ebc]) * percentage_of_traffic
 
 for edge, count in reversed(edges_with_ebc):
@@ -390,22 +468,23 @@ for edge, count in reversed(edges_with_ebc):
 
 print(f'{percentage_of_traffic * 100:.2f}% of traffic goes over {len(important_edges)} edges. That are {len(important_edges) / len(edges_with_ebc) * 100:.2f}% of all edges in the graph.')
 
-print(f'minimum edge betweenness centrality of important edges: {min([c for _, c in important_edges]):.0f}')
+print(f'minimum edge betweenness centrality of important edges: {min([c for _, c in important_edges]):.0f} ({min([c for _, c in important_edges]) / max(ebc):.2f})')
 
 df = list()
 for edge, count in important_edges:
     df.append({
-        'osmid': edge['osmid'],
-        'geometry': edge['geometry'],
+        'osmid': routing_graph.edges[edge]['osmid'],
+        'geometry': routing_graph.edges[edge]['geometry'],
         'ebc': count
     })
-important_edges_df = GeoDataFrame(df, geometry='geometry')
+important_edges_df = GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')
 important_edges_df.to_file('graph.gpkg', layer=f'{percentage_of_traffic * 100}_traffic_edges', driver='GPKG')
 
 # %%
 # plot edge betweenness centrality of edges with and without bike infrastructure
 osmids = dict()
-for edge, count in zip(wg.es, ebc):
+for edge, count in zip(routing_graph.edges, np.divide(ebc, max(ebc))):
+    edge = routing_graph.edges[edge]
     if type(edge['osmid']) is list:
         for osmid in edge['osmid']:
             osmids[osmid] = { 'count': count, 'edge': edge}
@@ -441,17 +520,18 @@ axs[1].set_ylabel('edge betweenness centrality')
 plt.show()
 
 # %%
+# analyze ebc at crossings depending on turning direction
 # get all crossing connections
 crossing_edges = []
 counts = []
-for edge, count in zip(wg.es, ebc):
-    if type(edge['osmid']) is not int and type(edge['osmid']) is not list:
+for edge, count in zip(routing_graph.edges, ebc):
+    if routing_graph.edges[edge].get('turning_angle', None) is not None:
         crossing_edges.append(edge)
         counts.append(count)
 
 crossings = {}
 for edge, count in zip(crossing_edges, counts):
-    turning_direction = get_turn_direction(float(edge['turning_angle']))
+    turning_direction = get_turn_direction(float(routing_graph.edges[edge]['turning_angle']))
     if crossings.get(turning_direction) is None:
         crossings[turning_direction] = []
     crossings[turning_direction].append(count)
@@ -466,35 +546,20 @@ for direction, c in crossings.items():
         color = 'green'
     elif direction == RIGHT:
         color = 'red'
-    elif direction == U_TURN:
-        color = 'orange'
 
     ax1.scatter(range(len(c)), sorted(c), c=color, s=1)
 
-plt.legend(['straight', 'left', 'right', 'u-turn'], loc='upper left')
+plt.legend(['straight', 'left', 'right'], loc='upper left')
 plt.ylabel('edge betweenness centrality')
 plt.title('edge betweenness centrality of crossing connections depending of the turning direction')
 plt.show()
-# %%
-# get important turns. turns that are above a ebc of 10_000_000
-left_turns = []
-for edge, count in zip(wg.es, ebc):
-    if type(edge['osmid']) is not int and count > 10_000_000:
-        if get_turn_direction(float(edge['turning_angle'])) == LEFT:
-            left_turns.append({
-                'id': edge.index,
-                'geometry': edge['shifted_geometry'],
-                'ebc': count
-            })
-left_turns = GeoDataFrame(left_turns)
-left_turns.to_file('graph.gpkg', layer='left_turns', driver='GPKG')
 
 # %%
 # map ebc count to bicycle graph to find connected components
 max_ebc: float = 0
 min_ebc: float = 0
 
-for count, edge in zip(ebc, routing_graph.edges(data=True, keys=True)):
+for count, edge in zip(norm_ebc, routing_graph.edges(data=True, keys=True)):
     u, v, key, data = edge
     try:
         old_edge_key = routing_graph.edges[u, v, key]['old_edge_key']
@@ -523,23 +588,40 @@ ox.graph_to_gdfs(bicycle_graph, nodes=False, edges=True).to_file('graph.gpkg', l
 
 # %%
 # initialize gap evaluator
-population_provider = GHSLPopulationProvider()
-# %%
+population_provider = NurenbergDistrictPopulationProvider()
+
 service_area_provider = ServiceAreaProvider(
     coverage_distance=300,
     buffer_value=50,
     routing_graph=bicycle_graph)
 
-service_area_provider = ServiceAreaProvider(
-    coverage_distance=300,
-    buffer_value=30,
-    routing_graph=bicycle_graph)
-# %%
 gap_evaluator = GapEvaluator(
     population_provider,
     service_area_provider,
-    osmids_with_bike_infra,
-    osmids_with_protected_bike_infra)
+    set(osmids_with_bike_infra),
+    set(osmids_with_protected_bike_infra))
+
+# %%
+# stats on connected components in the bicycle infrastructure graph
+bike_infra_graph = bicycle_graph.copy()
+for edge in bicycle_graph.edges(data=True, keys=True):
+    u, v, key, data = edge
+    osmid = data.get('osmid', None)
+    if osmid is None or osmid not in osmids_with_bike_infra:
+        bike_infra_graph.remove_edge(u, v, key)
+# remove isolated nodes
+isolated_nodes = list(nx.isolates(bike_infra_graph))
+bike_infra_graph.remove_nodes_from(isolated_nodes)
+cc_lengths = gap_evaluator.get_cc_lengths(bike_infra_graph)
+
+print(f'average length of connected components in the bicycle graph: {np.mean(cc_lengths):.2f} m')
+print(f'median length of connected components in the bicycle graph: {np.median(cc_lengths):.2f} m')
+print(f'minimum length of connected components in the bicycle graph: {np.min(cc_lengths):.2f} m')
+print(f'maximum length of connected components in the bicycle graph: {np.max(cc_lengths):.2f} m')
+
+# %%
+# standard deviation of the length of connected components in the bicycle graph
+print(f'standard deviation of the length of connected components in the bicycle graph: {np.std(cc_lengths):.2f} m')
 
 # %%
 # find all paths in an directed graph from a start node
@@ -553,7 +635,9 @@ def find_all_paths(graph: nx.MultiDiGraph, start_node: NodeId) -> list[list[Node
             paths.append(current_path.copy())
         else:
             for neighbor in neighbors:
-                dfs(neighbor, current_path)
+                # prevent cycles
+                if neighbor not in current_path:
+                    dfs(neighbor, current_path)
         current_path.pop()
 
     dfs(start_node, [])
@@ -574,8 +658,8 @@ def find_starting_nodes(graph: nx.MultiDiGraph) -> list[NodeId]:
             starting_nodes.append(node)
     return starting_nodes
 
-def find_gaps(graph: nx.MultiDiGraph) -> list[list[int]]:
-    gaps: list[list[int]] = []
+def find_gaps(graph: nx.MultiDiGraph) -> list[GapPath]:
+    gaps: list[GapPath] = []
     starting_nodes: list[NodeId] = find_starting_nodes(graph)
     for start_node in tqdm(starting_nodes, desc='finding gaps', unit='start_node'):
         paths = find_all_paths(graph, start_node)
@@ -584,7 +668,10 @@ def find_gaps(graph: nx.MultiDiGraph) -> list[list[int]]:
             if len(path_osmids) > 0:
                 gaps.append(path_osmids)
     return gaps
+
 #%%
+ebc_cutoff = 0.13
+
 def is_relevant_edge(edge: EdgeId, graph: nx.MultiDiGraph) -> bool:
     u, v, key = edge
     count: float = graph.edges[u, v, key].get('count', 0)
@@ -595,12 +682,12 @@ def is_relevant_edge(edge: EdgeId, graph: nx.MultiDiGraph) -> bool:
     else:
         reversed_count: float = 0
     
-    if count >= 8_000_000:
+    if count >= ebc_cutoff:
         return True
     else:
         return False
 
-for count, edge in zip(ebc, routing_graph.edges(data=True, keys=True)):
+for count, edge in zip(norm_ebc, routing_graph.edges(data=True, keys=True)):
     u, v, key, data = edge
     routing_graph.edges[u, v, key]['count'] = count
 
@@ -625,49 +712,102 @@ directed_gap_graph.remove_nodes_from(isolated_nodes)
 
 plot_shifted_graph(directed_gap_graph)[0].to_file('graph.gpkg', layer='directed_gap_graph', driver='GPKG')
 
-gaps = find_gaps(directed_gap_graph)
-print(f'found {len(gaps)} gaps in the directed graph')
+gap_paths = find_gaps(directed_gap_graph)
+print(f'found {len(gap_paths)} gaps in the directed graph')
 
 # %%
-# check if gap is a subset of another gap
-unique_gaps = []
-for idx, gap in enumerate(gaps):
-    gap_is_sublist = False
-    for other_idx, other_gap in enumerate(gaps):
-        if idx == other_idx:
-            continue
-        if is_sublist(gap, other_gap):
-            gap_is_sublist = True
-            break
-    if not gap_is_sublist:
-        unique_gaps.append(gap)
-print(f'found {len(unique_gaps)} unique gaps in the directed graph')
+
+def plot_gaps(gaps: list[Gap], graph: nx.MultiDiGraph, layer_name: str):
+    gaps_data = {'gap': [], 'geometry': []}
+    for idx, gap in enumerate(gaps):
+        gaps_data['gap'].append(idx)
+        gaps_data['geometry'].append(gap.get_geometry(graph))
+
+    gaps_gdf = gpd.GeoDataFrame(gaps_data, geometry='geometry', crs='EPSG:4326')
+    return gaps_gdf.to_file('gaps_analysis.gpkg', layer=layer_name, driver='GPKG')
+
+plot_gaps([Gap([path]) for path in gap_paths], bicycle_graph, 'all_gaps_raw')
+
+
 # %%
+# remove identical gaps
+print(f'found {len(gap_paths)} gaps in the directed graph')
+unique_gap_paths: list[GapPath] = []
+for idx, gap in enumerate(gap_paths):
+    gap_is_duplicate = False
+    for other_idx, other_gap in enumerate(unique_gap_paths):
+        if is_sublist(gap, other_gap) or is_sublist(other_gap, gap):
+            gap_is_duplicate = True
+            break
+    if not gap_is_duplicate:
+        unique_gap_paths.append(gap)
+            
+print(f'found {len(unique_gap_paths)} unique gaps in the directed graph after removing identical gaps')
+
+plot_gaps([Gap([path]) for path in unique_gap_paths], bicycle_graph, 'all_gaps_unique')
+
+
+#%%
 num_of_gaps_in_both_directions = 0
-for idx, gap in enumerate(unique_gaps):
-    for other_idx, other_gap in enumerate(unique_gaps):
+duplicate_indices: set[int] = set()
+for idx, gap in enumerate(unique_gap_paths):
+    if idx in duplicate_indices:
+        continue
+    for other_idx, other_gap in enumerate(unique_gap_paths):
         if idx == other_idx:
             continue
         if gap == list(reversed(list(other_gap))):
             num_of_gaps_in_both_directions += 1
+            duplicate_indices.add(other_idx)
             break
 
 print(f'found {num_of_gaps_in_both_directions} gaps that are the same in both directions')
+gaps: list[Gap] = [Gap([path]) for idx, path in enumerate(unique_gap_paths) if idx not in duplicate_indices]
+print(f'final number of gaps: {len(gaps)}')
 
-#%%
-gap_evaluator.with_connectedness_metrics(False)
-gap_evaluator.with_population_metrics(True)
-gap_evaluator.with_area_coverage_metrics(True)
-gaps_df = gap_evaluator.calculate_gap_metrics(unique_gaps, bicycle_graph)
-gaps_df
+plot_gaps(gaps, bicycle_graph, 'gaps')
 
 # %%
+with open('gaps.pickle', 'wb') as f:
+    pickle.dump(gaps, f)
+
+#%%
+gap_evaluator.with_connectedness_metrics(True)
+gap_evaluator.with_population_metrics(True)
+gap_evaluator.with_area_coverage_metrics(True)
+gaps_df = gap_evaluator.calculate_gap_metrics(gaps, bicycle_graph)
+gaps_df
+# %%
+x = gaps[0].get_graph(bicycle_graph)
+print(gap_evaluator.get_cc_lengths(x))
+print(gap_evaluator.get_cc_lengths(bicycle_graph))
+print(gap_evaluator.avg_size_of_connected_component(x, bicycle_graph))
+# %%
+gaps_df.to_file('gaps_analysis.gpkg', layer='all_gaps', driver='GPKG')
+# %%
+
+gaps_df.drop(columns='gap_geometry', inplace=False).set_geometry('gap_polygon').to_file('gaps_analysis.gpkg', layer='gaps_coverage', driver='GPKG')
+# %%
+gaps_df.drop(columns='gap_geometry', inplace=False).set_geometry('reachable_edges').to_file('gaps_analysis.gpkg', layer='gaps_reachable_edges', driver='GPKG')
+# %%
 for idx, gap in gaps_df.iterrows():
-    gap_gdf = gpd.GeoDataFrame([gap], geometry='geometry', crs='EPSG:4326')
+    gap_gdf = gpd.GeoDataFrame([gap], geometry='gap_geometry', crs='EPSG:4326')
     gap_gdf.to_file('gaps_analysis.gpkg', layer=f'gap_{idx}', driver='GPKG')
 # %%
 # sort gaps by added population coverage
 gaps_df = gaps_df.sort_values(by='additional_population_coverage', ascending=False)
+gaps_df.to_file('gaps_analysis.gpkg', layer='sorted_by_population_coverage', driver='GPKG')
+gaps_df.head(20)
+# %%
+# sort gaps by mean ebc
+gaps_df = gaps_df.sort_values(by='mean_ebc', ascending=False)
+gaps_df.to_file('gaps_analysis.gpkg', layer='sorted_by_mean_ebc', driver='GPKG')
+gaps_df.head(20)
+
+# %%
+# sort gaps by connectedness score
+gaps_df = gaps_df.sort_values(by='is_connecting_bike_infra', ascending=False)
+gaps_df.to_file('gaps_analysis.gpkg', layer='sorted_by_connectedness', driver='GPKG')
 gaps_df.head(20)
 # %%
 # iterate over gaps and save each gap as a layer in a geopackage
@@ -730,25 +870,19 @@ list2 = [5, 6, 7]
 jaccard_index(list2, list1)
 
 # %%
-line1 = gap1['gap_geometry']
-line2 = gap2['gap_geometry']
-
 # get the percentage of overlap between two lines
 def line_overlap_percentage(line1: shapely.LineString | shapely.MultiLineString, line2: shapely.LineString | shapely.MultiLineString) -> float:
     intersection = line1.intersection(line2)
     if intersection.is_empty:
         return 0.0
     return intersection.length / min(line1.length, line2.length)
-
-line_overlap_percentage(line1, line2)
-
 # %%
 overlaps = []
-for idx1, gap1 in gaps_df.iterrows():
-    for idx2, gap2 in gaps_df.iterrows():
+for idx1, gap1 in enumerate(gaps):
+    for idx2, gap2 in enumerate(gaps):
         if idx1 == idx2:
             continue
-        overlap = line_overlap_percentage(gap1['gap_geometry'], gap2['gap_geometry'])
+        overlap = line_overlap_percentage(gap1.get_geometry(bicycle_graph), gap2.get_geometry(bicycle_graph))
         overlaps.append((idx1, idx2, overlap))
 #%%
 # get boxplot of overlaps
@@ -760,36 +894,39 @@ plt.ylabel('Overlap Percentage')
 plt.show()
 # %%
 # get number of overlaps above a certain threshold
-threshold = 0.4
+threshold = 0.9
 num_overlaps_above_threshold = len([o for o in overlaps if o[2] > threshold])
 print(f'Number of overlaps above {threshold * 100}%: {num_overlaps_above_threshold / len(overlaps) * 100:.2f}%')
 # %%
+with open('gaps.pickle', 'rb') as f:
+    gaps = pickle.load(f)
+
+# %%
 # combine gaps if they are similar enough
-print(f'len before combining: {len(unique_gaps)}')
+print(f'len before combining: {len(gaps)}')
 iteration = 0
 while True:
     print(f'combination iteration {iteration}')
     combinations = 0
-    for idx1, gap1 in enumerate(unique_gaps):
-        line1 = ox.graph_to_gdfs(bicycle_graph.subgraph(gap1), nodes=False, edges=True)['geometry'].unary_union
-        for idx2, gap2 in enumerate(unique_gaps):
+    for idx1, gap1 in enumerate(gaps):
+        line1 = ox.graph_to_gdfs(gap1.get_graph(bicycle_graph), nodes=False, edges=True)['geometry'].unary_union
+        for idx2, gap2 in enumerate(gaps):
             if gap1 == gap2:
                 continue
-            line2 = ox.graph_to_gdfs(bicycle_graph.subgraph(gap2), nodes=False, edges=True)['geometry'].unary_union
+            line2 = ox.graph_to_gdfs(gap2.get_graph(bicycle_graph), nodes=False, edges=True)['geometry'].unary_union
             overlap = line_overlap_percentage(line1, line2)
-            if overlap > 0.4:
+            if overlap > 0.9:
                 print(f'combining gap {idx1} and gap {idx2} with overlap {overlap * 100:.2f}%')
-                combined_gap = list(set(gap1).union(set(gap2)))
-                unique_gaps.remove(gap1)
-                unique_gaps.remove(gap2)
-                unique_gaps.append(combined_gap)
+                gaps.remove(gap1)
+                gaps.remove(gap2)
+                gaps.append(merge_gaps([gap1, gap2]))
                 combinations += 1
                 break
     if combinations == 0:
         break
     iteration += 1
 
-print(f'len after combining: {len(unique_gaps)}')
+print(f'len after combining: {len(gaps)}')
 #%%
 unique_gaps
 # %%

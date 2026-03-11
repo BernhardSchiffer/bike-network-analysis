@@ -18,6 +18,7 @@ import pandas as pd
 import psycopg2
 import shapely
 from dotenv import load_dotenv
+from fontTools.cffLib.specializer import font
 from tqdm import tqdm
 
 from utils.graph_types import Route
@@ -297,9 +298,6 @@ for idx, _ in tqdm(df_all.iterrows(), desc='calculate route lengths', total=len(
     calculated_routes_idx = calculated_routes_idx + 1
 
 # %%
-df_all
-
-# %%
 # plot heatmap of calculated routes
 counts_values_shortest = get_edge_count([ s for s in shortest_routes if correct_routes(s)], graph)
 plot_edge_count(graph, counts_values_shortest, expanded=True, cmap=plt.get_cmap('turbo')).to_file(filename='graph.gpkg', layer='shortest_path_usage', driver='GPKG')
@@ -328,14 +326,15 @@ distance_step = 50
 bins = np.arange(0, max_distance + distance_step, distance_step)
 
 # show histogram of route lengths shorter than 5000 meters
-plt.figure(figsize=(10, 6))
-plt.hist([l for l in route_lengths if l < max_distance], bins=bins, color='#0072B2')
-plt.title('Histogram of Shortest Route Lengths for VAG-Rad Rentals')
-plt.xlabel('Route Length (meters)')
-plt.ylabel('Number of Rentals')
-plt.xticks(range(0, 10001, 500), rotation=45)
-plt.yticks(range(0, 90001, 10000))
+plt.figure(figsize=(9, 6))
+plt.hist([l for l in route_lengths if l < max_distance], bins=bins, color='#1f78b4')
+plt.title('Histogram of Shortest Route Lengths for VAG-Rad Rentals', fontsize=16)
+plt.xlabel('Route Length (meters)', fontsize=12)
+plt.ylabel('Number of Rentals', fontsize=12)
+plt.xticks(range(0, 10001, 500), rotation=45, fontsize=11)
+plt.yticks(range(0, 90001, 10000), fontsize=11)
 plt.grid()
+plt.tight_layout()
 plt.savefig('shortest_route_lengths_histogram.png', dpi=300)
 
 # group routes by length
@@ -426,16 +425,17 @@ max_distance = 10000
 distance_step = 50
 bins = np.arange(0, max_distance + distance_step, distance_step)
 
-plt.figure(figsize=(10, 6))
+plt.figure(figsize=(9, 6))
 plt.hist([l for l in df_all['shortest_route_length'].dropna().tolist() if l < max_distance], bins=bins, color='#1f78b4', alpha=0.5)
 plt.hist([l for l in df_all['route_length'].dropna().tolist() if l < max_distance], bins=bins, color='#33a02c', alpha=0.5)
-plt.title('Histogram of Route Lengths for VAG-Rad Rentals')
-plt.xlabel('Route Length (meters)')
-plt.ylabel('Number of Rentals')
-plt.xticks(range(0, 10001, 500), rotation=45)
-plt.yticks(range(0, 90001, 10000))
-plt.legend(['Shortest Routes', 'Weighted Routes'], loc='upper right')
+plt.title('Histogram of Route Lengths for VAG-Rad Rentals', fontsize=16)
+plt.xlabel('Route Length (meters)', fontsize=12)
+plt.ylabel('Number of Rentals', fontsize=12)
+plt.xticks(range(0, 10001, 500), rotation=45, fontsize=11)
+plt.yticks(range(0, 90001, 10000), fontsize=11)
+plt.legend(['Shortest Routes', 'Weighted Routes'], loc='upper right', fontsize=12)
 plt.grid()
+plt.tight_layout()
 plt.savefig('combined_route_lengths_histogram.png', dpi=300)
 # %%
 def get_route_geometry(route: Route, graph: nx.MultiDiGraph) -> shapely.LineString:
@@ -522,7 +522,7 @@ count_shortest_routes = get_ebc_values_from_gpkg('graph.gpkg', 'shortest_path_us
 count_weighted_routes = get_ebc_values_from_gpkg('graph.gpkg', 'weighted_path_usage', graph)
 
 diff_weighted_shortest_routes = compare_ebc_values(count_weighted_routes, count_shortest_routes)
-diff_ebc_weighted_routes = compare_ebc_values(ebc, count_weighted_routes)
+diff_ebc_weighted_routes = compare_ebc_values(count_weighted_routes, ebc)
 
 plot_edge_count(graph, diff_weighted_shortest_routes, expanded=True, cmap=plt.get_cmap('PiYG'), normalize=False, render_order_func=diff_render_order_func).to_file(filename='graph.gpkg', layer='diff_weighted_shortest', driver='GPKG')
 

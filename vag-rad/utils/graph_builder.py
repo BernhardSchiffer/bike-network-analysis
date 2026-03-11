@@ -636,33 +636,56 @@ class GraphBuilder:
         
         return sum(penalties)
         
-    def get_applied_filters(self, u, v, data) -> list[str]:
+    def get_applied_filters(self, graph: nx.MultiDiGraph, u, v, data) -> list[str]:
         try:
             osmid = data['osmid']
-            streetDirection: StreetDirection
-            if not data.get('reversed', False):
-                streetDirection = Forward
+            
+            if type(osmid) is tuple:
+                filters_per_osmid = {}
+                directions: list[StreetDirection]= []
+                for _, _, _, d in graph.in_edges(u, data=True, keys=True):
+                    if d['osmid'] == osmid[0]:
+                        if d.get('reversed', False):
+                            directions.append(Backward)
+                        else:
+                            directions.append(Forward)
+                        break
+                for _, _, _, d in graph.out_edges(v, data=True, keys=True):
+                    if d['osmid'] == osmid[1]:
+                        if d.get('reversed', False):
+                            directions.append(Backward)
+                        else:
+                            directions.append(Forward)
+                        break
+                        
+                for id, direction in zip(osmid, directions):
+                    tags = self.edges_osm_data_lookup.loc[id, 'tags']
+                    applied_filters = []
+                    for filter_function, benefit in self.route_choices:
+                        if filter_function(tags, direction):
+                            applied_filters.append(filter_function.__name__)
+                    filters_per_osmid[id] = applied_filters
+                
+                # get list of applied filters that are applied to both osmids
+                common_filters = set(filters_per_osmid[osmid[0]]).intersection(set(filters_per_osmid[osmid[1]]))
+                return list(common_filters)
             else:
-                streetDirection = Backward
-            if type(osmid) is list:
-                for id in osmid:
-                    try:
-                        tags = self.edges_osm_data_lookup.loc[id, 'tags']
-                    except:
-                        pass
-                # merge two dictionaries
-                tags = {**tags, **tags}
-            else:
+                streetDirection: StreetDirection
+                if data.get('reversed', False):
+                    streetDirection = Backward
+                else:
+                    streetDirection = Forward
                 tags = self.edges_osm_data_lookup.loc[osmid, 'tags']
+
+                applied_filters = []
+                for filter_function, benefit in self.route_choices:
+                    if filter_function(tags, streetDirection):
+                        applied_filters.append(filter_function.__name__)
+                
+                return applied_filters
         except:
             raise ValueError(f'could not find edge with osmid {osmid}')
-
-        applied_filters = []
-        for filter_function, benefit in self.route_choices:
-            if filter_function(tags, streetDirection):
-                applied_filters.append(filter_function.__name__)
-        
-        return applied_filters
+        return []
     
     def get_turn_penalty(self,graph: nx.MultiDiGraph, edge_id: EdgeId, turn_angle: float) -> float:
         MILES_IN_METERS = 1609.34
@@ -728,12 +751,13 @@ class GraphBuilder:
                 penalty = self.get_turn_penalty(graph, (u, v, key), turning_angle)
                 penalties[u,v,key] = {'penalty': penalty}
                 weights[u,v,key] = {'weight': penalty}
+                applied_filters[u,v,key] = {'applied_filters': self.get_applied_filters(graph, u, v, data)}
             else:
                 try:
                     penalty = self.get_penalty(u, v, data)
                     penalties[u,v,key] = {'penalty': penalty}
                     weights[u,v,key] = {'weight': float(data['length'] * penalty)}
-                    applied_filters[u,v,key] = {'applied_filters': self.get_applied_filters(u, v, data)}
+                    applied_filters[u,v,key] = {'applied_filters': self.get_applied_filters(graph, u, v, data)}
                 except:
                     problematic_osmids.append(data['osmid'])
                     penalty = 1.0

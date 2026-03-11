@@ -47,13 +47,15 @@ print(f'99th percentile rental duration: {int(p99.total_seconds() // 60)} minute
 
 durations = df_all['Duration']
 durations = np.divide(durations, 60)  # convert to minutes
-plt.figure(figsize=(10, 6))
-plt.hist(durations, bins=100, range=(0, 100), color='#0072B2')
-plt.title('Histogram of rental durations')
-plt.xlabel('Duration (min)')
-plt.xticks(range(0, 101, 5))
-plt.ylabel('Number of rentals')
+plt.figure(figsize=(9, 6))
+plt.hist(durations, bins=100, range=(0, 100), color='#1f78b4')
+plt.title('Histogram of Rental Durations', fontsize=16)
+plt.xlabel('Duration (minutes)', fontsize=12)
+plt.xticks(range(0, 101, 5), fontsize=11)
+plt.yticks(fontsize=11)
+plt.ylabel('Number of Rentals', fontsize=12)
 plt.grid()
+plt.tight_layout()
 plt.savefig('vag_rad_rental_durations.png', dpi=300)
 
 # %%

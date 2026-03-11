@@ -12,7 +12,6 @@ import numpy as np
 import osmium
 import osmnx as ox
 import osmnx.settings
-import overpy
 import shapely
 from IPython.display import display
 from matplotlib.cm import get_cmap
@@ -21,7 +20,7 @@ from osmium.filter import EmptyTagFilter, EntityFilter
 from osmium.osm import WAY
 from tqdm import tqdm
 
-from utils.overpass_utils import fetch_city_polygon
+from utils.overpass_utils import fetch_city_polygon, query_overpass
 from utils.polygon_filter import PolygonFilter
 from utils.population_provider import (
     GHSLPopulationProvider,
@@ -30,19 +29,6 @@ from utils.population_provider import (
 from utils.service_area_provider import ServiceAreaProvider
 from utils.utils import get_path_length
 
-
-# helper function
-def query_overpass(custom_filter: str, api = overpy.Overpass(url='https://maps.mail.ru/osm/tools/overpass/api/interpreter')) -> overpy.Result:
-    query = f"""
-                [out:json][timeout:60][date:"2025-10-21T20:21:22Z"];
-                (
-                    {custom_filter}
-                );
-                out body;
-                >;
-                out skel qt;
-            """
-    return api.query(query)
 # %% 
 # evaluation of osm features in Nürnberg
 print("Total number of objects in Mittelfranken:", sum(1 for o in osmium.FileProcessor('mittelfranken-latest.osm.pbf')))
@@ -90,7 +76,7 @@ sorted(bicycle_stats.most_common(len(bicycle_stats)))
 #f.close()
 
 # %% 
-# fetch graph of all streets available by bike
+# fetch osmids of bicycle infrastructure in Nürnberg
 place_name = 'Nürnberg'
 query_polygon = fetch_city_polygon(place_name)
 
@@ -278,13 +264,13 @@ def remove_edges_below_length_threshold(graph: nx.MultiDiGraph, length_threshold
 # compute the coverage of the bicycle infrastructure
 meaningful_bicycle_infra_graph = remove_edges_below_length_threshold(bicycle_infrastructure_graph, length_threshold=200)
 
-bike_infra_coverage, _ = service_area_provider.get_service_area(list(meaningful_bicycle_infra_graph.nodes))
+bike_infra_coverage, _ = service_area_provider.get_service_area(meaningful_bicycle_infra_graph)
 
 
 # compute the coverage of protected bicycle infrastructure
 meaningful_bicycle_infra_graph = remove_edges_below_length_threshold(protected_bicycle_infrastructure_graph, length_threshold=200)
 
-protected_bike_infra_coverage, _ = service_area_provider.get_service_area(list(meaningful_bicycle_infra_graph.nodes))
+protected_bike_infra_coverage, _ = service_area_provider.get_service_area(meaningful_bicycle_infra_graph)
 
 # %%
 nbg_place = ox.geocode_to_gdf('Nürnberg')

@@ -136,6 +136,9 @@ for node, data in tqdm(list(routing_graph.nodes(data=True)), desc='adding vag ra
     routing_graph.nodes[node]['vag_rad_demand_starts'] = demand[0]
     routing_graph.nodes[node]['vag_rad_demand_endings'] = demand[1]
 
+    routing_graph.nodes[node]['vag_rad_demand_starts_cutoff'] = demand[0] if demand[0] >= 100 else 0
+    routing_graph.nodes[node]['vag_rad_demand_endings_cutoff'] = demand[1] if demand[1] >= 100 else 0
+
 #%%
 # create igraph from networkx graph for ebc calculation
 wg: ig.Graph = ig.Graph.from_networkx(routing_graph)
@@ -218,11 +221,14 @@ population_weights = node_weight(weight_function.GRAVITY_MODEL, 'population', 'p
 
 population_weights_exponential = node_weight(weight_function.EXPONENTIAL_GRAVITY_MODEL, 'population', 'population').to_dict()
 
-vag_rad_weights = node_weight(weight_function.GRAVITY_MODEL, 'vag_rad_demand_starts', 'vag_rad_demand_endings').to_dict()
+vag_rad_weights = node_weight(weight_function.EXPONENTIAL_GRAVITY_MODEL, 'vag_rad_demand_starts', 'vag_rad_demand_endings').to_dict()
+
+vag_rad_cutoff_weights = node_weight(weight_function.EXPONENTIAL_GRAVITY_MODEL, 'vag_rad_demand_starts_cutoff', 'vag_rad_demand_endings_cutoff').to_dict()
 
 target_nodes = list(target_nodes)
 start_nodes = list(start_nodes)
 
+# %%
 # weighted cutoff
 start = time.time()
 ebc = wg.edge_betweenness_weighted(directed=True, distances="weight", edge_weights="weight", sources=start_nodes, targets=target_nodes, node_weights=[], lower_limit=0, upper_limit=5000, normalized=False)
@@ -271,13 +277,20 @@ ebc = wg.edge_betweenness_weighted(directed=True, distances="length_km", edge_we
 end = time.time()
 print(f'calculated edge betweenness centrality in {end - start} seconds')
 plot_edge_betweenness_centrality(routing_graph, ebc, expanded=True).to_file('ebc.gpkg', layer='ebc_area_normalization_population_exponential', driver='GPKG')
-
-# area normalization + population vag rad weights
+# %%
+# area normalization + vag rad weights
 start = time.time()
-ebc = wg.edge_betweenness_weighted(directed=True, distances="length", edge_weights="weight", sources=start_nodes, targets=target_nodes, node_weights=[area_normalization, vag_rad_weights], lower_limit=500, upper_limit=5000, normalized=False)
+ebc = wg.edge_betweenness_weighted(directed=True, distances="length_km", edge_weights="weight", sources=start_nodes, targets=target_nodes, node_weights=[area_normalization, vag_rad_weights], lower_limit=0.5, upper_limit=5, normalized=False)
 end = time.time()
 print(f'calculated edge betweenness centrality in {end - start} seconds')
 plot_edge_betweenness_centrality(routing_graph, ebc, expanded=True).to_file('ebc.gpkg', layer='ebc_area_normalization_bike_sharing', driver='GPKG')
+
+# area normalization + vag rad cutoff weights
+start = time.time()
+ebc = wg.edge_betweenness_weighted(directed=True, distances="length_km", edge_weights="weight", sources=start_nodes, targets=target_nodes, node_weights=[area_normalization, vag_rad_cutoff_weights], lower_limit=0.5, upper_limit=5, normalized=False)
+end = time.time()
+print(f'calculated edge betweenness centrality in {end - start} seconds')
+plot_edge_betweenness_centrality(routing_graph, ebc, expanded=True).to_file('ebc.gpkg', layer='ebc_area_normalization_bike_sharing_cutoff', driver='GPKG')
 
 # %%
 # load computed ebc values
