@@ -74,8 +74,8 @@ for bar, turn_angle in zip(ax.patches, bin_centers_deg):
 
 #plt.legend(['Straight (-60° to 60°)', 'Left Turn (< -60°)', 'Right Turn (> 60°)'], loc='upper right', bbox_to_anchor=(1.1, 1.1))
 
-#plt.show()
-plt.savefig('turning_angles_polar_plot.png', dpi=300)
+plt.tight_layout()
+plt.savefig('figures/turning_angles_polar_plot.png', dpi=300)
 
 # %%
 # plot pie chart to represent the distribution of turning angles
